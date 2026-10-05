@@ -123,11 +123,12 @@ def map_book_xd(b: dict) -> str:
     if "培智" in xdtype:
         return "培智学校"
     if "六三" in xdtype:
-        if xd == "初中":
+        # xd 可能已是「初中（六三学制）」完整名，不能只匹配裸「初中」
+        if xd == "初中" or "初中" in xd:
             return "初中（六三学制）"
         return "小学（六三学制）"
     if "五四" in xdtype:
-        if xd == "初中":
+        if xd == "初中" or "初中" in xd:
             return "初中（五·四学制）"
         return "小学（五四学制）"
     if xd == "高中":
