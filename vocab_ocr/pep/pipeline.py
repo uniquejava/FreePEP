@@ -183,7 +183,9 @@ def rebuild_index_from_books(out_dir: Path = DEFAULT_OUT) -> Path:
             results.append(prepare_book_for_index(json.loads(p.read_text(encoding="utf-8"))))
     if not results:
         raise FileNotFoundError(f"no PEP book JSON under {books_dir}")
-    return build_inverted_index(results, out_dir, basename="vocab-index")
+    # Cached Tesseract books predate the source-PDF quality review in #04.
+    # Rebuilding them is useful for diagnostics, but may not publish an index.
+    return build_inverted_index(results, DEFAULT_WORK / "legacy-preview", basename="vocab-index")
 
 
 def process_all(
@@ -210,8 +212,9 @@ def process_all(
         p = books_dir / f"{b.id}.json"
         if p.exists():
             merged.append(prepare_book_for_index(json.loads(p.read_text(encoding="utf-8"))))
-    # A single-book run is a preview. Keep the checked-in full index intact.
-    target_dir = DEFAULT_WORK / "preview" if book_ids else DEFAULT_OUT
+    # #04 found systematic cross-column errors in every catalog book. Legacy
+    # Tesseract output is always a preview, including --all.
+    target_dir = DEFAULT_WORK / "preview" if book_ids else DEFAULT_WORK / "legacy-preview"
     path = build_inverted_index(merged, target_dir, basename="vocab-index")
     print(f"index -> {path}")
     return path

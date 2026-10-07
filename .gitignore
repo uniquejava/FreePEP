@@ -1,6 +1,12 @@
 /build
 /dist
 
+# local credentials and service configuration
+/.env
+/.env.*
+!/.env.example
+!/.env.sample
+
 # local downloads & scrape cache (large)
 /downloads/
 /temp_pages/

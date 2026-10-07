@@ -1,0 +1,49 @@
+{
+  "junior-7a": [
+    {"pdf_page": 130, "word": "bicycle", "unit": "starter-2", "page": 8, "zh": "自行车；脚踏车"},
+    {"pdf_page": 130, "word": "welcome", "unit": "starter-2", "page": 11, "zh": "受欢迎的；欢迎"}
+  ],
+  "junior-7b": [
+    {"pdf_page": 109, "word": "perfect", "unit": "3", "page": 19, "zh": "完美的；极好的"},
+    {"pdf_page": 109, "word": "sit-up", "unit": "3", "page": 22, "zh": "仰卧起坐"}
+  ],
+  "junior-8a": [
+    {"pdf_page": 126, "word": "disappointed", "unit": "4", "page": 36, "zh": "失望的；沮丧的"},
+    {"pdf_page": 126, "word": "role", "unit": "4", "page": 38, "zh": "作用；职能；角色"}
+  ],
+  "junior-8b": [
+    {"pdf_page": 139, "word": "hide", "unit": "5", "page": 45, "zh": "躲藏；隐藏"},
+    {"pdf_page": 139, "word": "interviewer", "unit": "8", "page": 73, "zh": "面试官；采访者"}
+  ],
+  "junior-9": [
+    {"pdf_page": 178, "word": "ring", "unit": "6", "page": 44, "zh": "（使）发出钟声或铃声；打电话"},
+    {"pdf_page": 178, "word": "Berlin", "unit": "6", "page": 46, "zh": "柏林（德国城市）"}
+  ],
+  "senior-compulsory-1": [
+    {"pdf_page": 126, "word": "affair", "unit": "5", "zh": "公共事务；事件；关系"}
+  ],
+  "senior-compulsory-2": [
+    {"pdf_page": 119, "word": "neighbourhood", "unit": "2", "zh": "临近的地方；街区"},
+    {"pdf_page": 119, "word": "piano", "unit": "5", "zh": "钢琴"}
+  ],
+  "senior-compulsory-3": [
+    {"pdf_page": 119, "word": "Henry Norman Bethune", "unit": "2", "zh": "亨利·诺曼·白求恩"}
+  ],
+  "senior-optional-1": [
+    {"pdf_page": 120, "word": "air conditioner", "unit": "2", "zh": "空调机；空调设备"},
+    {"pdf_page": 120, "word": "assessment", "unit": "4", "zh": "评价；评定"},
+    {"pdf_page": 120, "word": "assumption", "unit": "5", "zh": "假定；设定；（责任的）承担；（权力的）获得"}
+  ],
+  "senior-optional-2": [
+    {"pdf_page": 124, "word": "bun", "unit": "3", "zh": "圆面包；小圆甜饼"},
+    {"pdf_page": 124, "word": "consume", "unit": "3", "zh": "吃；喝；饮；消耗"}
+  ],
+  "senior-optional-3": [
+    {"pdf_page": 124, "word": "Picasso", "unit": "1", "zh": "毕加索（西班牙画家、雕塑家）"},
+    {"pdf_page": 124, "word": "rely", "unit": "2", "zh": "依赖；依靠；信赖"}
+  ],
+  "senior-optional-4": [
+    {"pdf_page": 119, "word": "barbecue", "unit": "2", "zh": "户外烧烤；烤架"},
+    {"pdf_page": 119, "word": "Chiang Mai", "unit": "2", "zh": "清迈（泰国城市）"}
+  ]
+}

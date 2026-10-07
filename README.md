@@ -95,9 +95,9 @@ python cli.py --xd "高中" --xk "英语" -o ./downloads/高中/英语 --flat -y
 
 ```bash
 brew install poppler tesseract tesseract-lang   # pdftoppm + eng/chi_sim
-python3 -m vocab_ocr pep --all                 # 缺册才 OCR；--force 重跑
+python3 -m vocab_ocr pep --all                 # 缺册才 OCR；旧 OCR 结果只生成预览
 python3 -m vocab_ocr pep --book junior-8a --force  # 单册预览写入 data/vocab/_work/preview/
-python3 -m vocab_ocr pep --rebuild-index       # 仅从 books/*.json 重打包
+python3 -m vocab_ocr pep --rebuild-index       # 仅从 books/*.json 重打包旧 OCR 预览
 ```
 
 人教与新概念共用索引 schema `v: 1`：每条 hit **末尾是中文释义**；同一词在两单元/课出现则两条 hit。词性不进索引。
@@ -112,7 +112,7 @@ python3 -m vocab_ocr pep --rebuild-index       # 仅从 books/*.json 重打包
 }
 ```
 
-`w[word]` → `[book_id, unit|lesson, zh]`，有页码时为 `[book_id, unit|lesson, page, zh]`。`--book` 只在忽略入库的 `_work/preview/` 生成单册预览，不覆盖正式索引；`--all` 和 `--rebuild-index` 才写全系列索引。`_work/`、分册 `books/*.json` 不入库。空释义与明显 OCR 碎片会被排除；初中目录识别失败时，对已核对页数的本机版本使用目录页单元起始页。
+`w[word]` → `[book_id, unit|lesson, zh]`，有页码时为 `[book_id, unit|lesson, page, zh]`。旧 OCR 的 `--book`、`--all` 和 `--rebuild-index` 只在忽略入库的 `_work/` 生成预览，不覆盖正式索引。`_work/`、分册 `books/*.json` 不入库。空释义与明显 OCR 碎片会被排除；初中目录识别失败时，对已核对页数的本机版本使用目录页单元起始页。
 
 **质量状态（2026-10-08）**：正式索引虽覆盖 12 册，但尚不能直接作为可靠的词源标签。按固定种子和高风险规则抽取的 60 条候选中，先对照 12 册 PDF 各核 1 条，12 条均发现至少一项错误；这是混合抽样，不能当作总体错误率。主要是双栏词表被传统 OCR 串成一行，造成词头、释义、页码和单元号串栏。详见 [抽检 ticket #04](./.scratch/english-vocab-ocr/issues/04-pep-index-spot-check.md)。重建前不要将它视为已校准索引。
 
@@ -124,6 +124,8 @@ python3 -m vocab_ocr.pep.audit
 ```
 
 逐行打开 CSV 的 `pdf` 与 `source_pdf_page`，以原书图片为准核词头和中文释义。初中 A–Z 的 `p.` 页码再对目录 Unit 起始页；高中直接核词后的括号单元号。`word_ok`、`zh_ok`、`unit_ok`、`page_ok` 分别填 `yes/no/na/unclear`，疑点写 `notes`。本机 LM Studio 的 Gemma 4 26B 视觉模型在小样本里能分开双栏词，但仍漏释义或误读单元号；可用作下一版提取候选，必须再做 PDF 对照和覆盖率检查。
+
+整页视觉转录是尚未完成的实验流程。复制 `.env.sample` 为本机 `.env`，设置 `LM_STUDIO_BASE_URL`，并先在 LM Studio 中启动对应视觉模型。`python3 -m vocab_ocr pep --vision --book junior-8a --vision-page 126` 只生成 `_work/vision/` 候选；`--check-vision` 报告质量阻碍。`--publish-vision` 仅在 12 册及原页人工复核全部过关时发布，目前不能据此更新正式索引。
 
 新概念二册试点不走全书 OCR。输入是本机 Excel（第一个工作表前四列：`单词 / 英音 / 美音 / 释义`）和按 `Lesson N` 分组的课次词表纯文本。默认 Excel 位于 `~/code/English/8.新概念英语/新概念英语第二册（新版）.xlsx`；课次词表默认读取 `data/vocab/_work/nce-2/sohu-lesson-vocab.txt`，缺失时从 [搜狐课次词表](https://www.sohu.com/a/517761822_699921) 获取。可用参数指定本机副本，避免依赖固定目录或在线页面：
 
