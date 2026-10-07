@@ -11,7 +11,7 @@ Outputs (gitignored _work + committed index):
   data/vocab/_work/nce-2/excel.csv
   data/vocab/_work/nce-2/excel-with-lesson.csv  (includes pos for QA)
   data/vocab/_work/nce-2/lesson-vocab.csv       (includes pos for QA)
-  data/vocab/nce-vocab-index.min.json   (nce-2 only; same schema as PEP, v:1; pos NOT in hits)
+  data/vocab/_work/nce-2/nce-vocab-index.min.json   (lesson-level pilot only)
 
 Index hit shape (shared with PEP, vocab_ocr.shared.build_index.INDEX_VERSION):
   [book_id, lesson, zh]
@@ -30,7 +30,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from vocab_ocr.shared.build_index import INDEX_VERSION
-from vocab_ocr.shared.paths import DEFAULT_OUT, DEFAULT_WORK, ROOT
+from vocab_ocr.shared.paths import DEFAULT_WORK, ROOT
 
 NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 XLSX_DEFAULT = Path.home() / "code/English/8.新概念英语/新概念英语第二册（新版）.xlsx"
@@ -415,7 +415,7 @@ def run(xlsx: Path = XLSX_DEFAULT, lesson_vocab: Path | None = None) -> dict:
             w.writerow({k: r.get(k, "") for k in w.fieldnames})
 
     index = build_index(rows_out)
-    min_path = DEFAULT_OUT / "nce-vocab-index.min.json"
+    min_path = work / "nce-vocab-index.min.json"
     min_path.write_text(
         json.dumps(index, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
     )

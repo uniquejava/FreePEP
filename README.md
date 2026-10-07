@@ -100,7 +100,7 @@ python3 -m vocab_ocr pep --book junior-8a --force  # 单册预览写入 data/voc
 python3 -m vocab_ocr pep --rebuild-index       # 仅从 books/*.json 重打包旧 OCR 预览
 ```
 
-人教与新概念共用索引 schema `v: 1`：每条 hit **末尾是中文释义**；同一词在两单元/课出现则两条 hit。词性不进索引。
+人教与新概念共用索引 schema `v: 1`：每条 hit 末尾是中文释义字符串；没有可靠教材释义时为空字符串。人教同一词在两单元出现则保留两条 hit，新概念当前按册去重。词性不进索引。
 
 ```json
 {
@@ -127,13 +127,13 @@ python3 -m vocab_ocr.pep.audit
 
 整页视觉转录是尚未完成的实验流程。复制 `.env.sample` 为本机 `.env`，设置 `LM_STUDIO_BASE_URL`，并先在 LM Studio 中启动对应视觉模型。`python3 -m vocab_ocr pep --vision --book junior-8a --vision-page 126` 只生成 `_work/vision/` 候选；`--check-vision` 报告质量阻碍。`--publish-vision` 仅在 12 册及原页人工复核全部过关时发布，目前不能据此更新正式索引。
 
-新概念二册试点不走全书 OCR。输入是本机 Excel（第一个工作表前四列：`单词 / 英音 / 美音 / 释义`）和按 `Lesson N` 分组的课次词表纯文本。默认 Excel 位于 `~/code/English/8.新概念英语/新概念英语第二册（新版）.xlsx`；课次词表默认读取 `data/vocab/_work/nce-2/sohu-lesson-vocab.txt`，缺失时从 [搜狐课次词表](https://www.sohu.com/a/517761822_699921) 获取。可用参数指定本机副本，避免依赖固定目录或在线页面：
+新概念经典新版 1–4 册采用更快的册级索引：直接读取 [lilinji/English](https://github.com/lilinji/English) 的四份 Excel，只记录词条出现在哪一册，不做 PDF OCR 或 Lesson 对齐。源仓库 README 标注 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)；本索引是来源词表的派生数据，按来源许可使用，与仓库代码的 MIT 许可分开。这里只提交册级索引，不提交原 Excel。每条 hit 仍保持 `v:1` 的三段结构 `[book_id, "", ""]`，空的第二、三段表示没有课次和教材原文释义。Excel 本身的通用词典释义不等于教材释义，所以不写入索引。
 
 ```bash
-python3 -m vocab_ocr.nce.pilot_nce2_from_excel --xlsx /path/to/新概念英语第二册.xlsx --lesson-vocab /path/to/lesson-vocab.txt
+python3 -m vocab_ocr.nce.build_book_index --source-dir '/path/to/8.新概念英语'
 ```
 
-产出 [`data/vocab/nce-vocab-index.min.json`](./data/vocab/nce-vocab-index.min.json)（同一 `v: 1`）。三、四册未做。票在 [`.scratch/english-vocab-ocr/`](./.scratch/english-vocab-ocr/)（`#01`）和 [`.scratch/nce-vocab-index/`](./.scratch/nce-vocab-index/)（`#02`）。
+默认输入目录是 `~/code/English/8.新概念英语/`，输出为 [`data/vocab/nce-vocab-index.min.json`](./data/vocab/nce-vocab-index.min.json)。缺任一册 Excel 时生成器会失败，保留现有索引。原二册 `python3 -m vocab_ocr.nce.pilot_nce2_from_excel` 仍可用于研究课次对齐，但现在只写入 `_work/nce-2/` 预览，不覆盖四册正式索引。票在 [`.scratch/english-vocab-ocr/`](./.scratch/english-vocab-ocr/)（`#01`）和 [`.scratch/nce-vocab-index/`](./.scratch/nce-vocab-index/)（`#02`）。
 
 ---
 
