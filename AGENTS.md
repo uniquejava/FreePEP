@@ -9,3 +9,19 @@
 3. **代理分流**：`*.20190723.xyz` 可用 `127.0.0.1:7897`；`book.pep.com.cn` 逐页下载用直连。
 4. **「文字版」≠ 无图纯文本**：是轻量整页 PDF；文字稿靠后续 OCR。
 5. **落盘**：`downloads/789txt-main/`、`downloads/初中（六三学制）/<年级>/`、`downloads/高中/<学科>/`；勿把大体量 PDF 提交进 git。
+6. **英语词源索引**：人教/新概念共用同一 schema（`v:1`，hit=`[book, unit|lesson, zh?page…]`，词性不进索引）。人教 `python3 -m vocab_ocr pep`；新概念试点 `python3 -m vocab_ocr.nce.pilot_nce2_from_excel`（仅 nce-2）。只提交 `data/vocab/vocab-index.min.json` / `nce-vocab-index.min.json`，勿提交 `_work/` / `books/` / PDF。消费方：EggplantDict `#21`。
+7. **对话标题**：工作对话以项目票号开头（`#01` 人教词源、`#02` 新概念词源…）；多票保留全部编号。仅当当前会话已有 `cursor-app-control.rename_chat` 时调用一次；没有就写出应使用的标题，不要排查 MCP。
+
+## Agent skills
+
+### Issue tracker
+
+需求和 tickets 使用本地 Markdown，见 [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md)。
+
+### Triage labels
+
+使用默认五种状态，见 [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md)。
+
+### Domain docs
+
+单一上下文领域文档布局，见 [`docs/agents/domain.md`](docs/agents/domain.md)。

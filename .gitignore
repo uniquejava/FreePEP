@@ -5,6 +5,15 @@
 /downloads/
 /temp_pages/
 
+# vocab OCR: keep lean index only; regenerable dumps stay local
+/data/vocab/_work/
+/data/vocab/books/
+/data/vocab/vocab-index.json
+
+# local agent scratch keeps tickets; ignore bulky dumps only
+/.scratch/**/_work/
+/.scratch/**/*.pdf
+
 # python
 __pycache__/
 *.py[cod]

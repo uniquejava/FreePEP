@@ -88,6 +88,35 @@ python cli.py --xd "高中" --xk "英语" -o ./downloads/高中/英语 --flat -y
 
 ---
 
+## 英语单词来源索引（OCR）
+
+人教 PEP：先读目录页定位附录词表，再 OCR。代码在 `vocab_ocr/pep/`（共享工具 `vocab_ocr/shared/`）。产出：[`data/vocab/vocab-index.min.json`](./data/vocab/vocab-index.min.json)。
+
+```bash
+brew install poppler tesseract tesseract-lang   # pdftoppm + eng/chi_sim
+python3 -m vocab_ocr pep --all                 # 缺册才 OCR；--force 重跑
+python3 -m vocab_ocr pep --book junior-8a --force
+python3 -m vocab_ocr pep --rebuild-index       # 仅从 books/*.json 重打包
+```
+
+人教与新概念共用索引 schema `v: 1`：每条 hit **末尾是中文释义**；同一词在两单元/课出现则两条 hit。词性不进索引。
+
+```json
+{
+  "v": 1,
+  "books": { "junior-8a": "英语八年级上册" },
+  "w": {
+    "landscape": [["junior-8a", "1", "风景；景色"], ["junior-8a", "8", "风景；景色"]]
+  }
+}
+```
+
+`w[word]` → `[book_id, unit|lesson, zh]`，有页码时为 `[book_id, unit|lesson, page, zh]`。`--book` 只索引所选册；`--all` 合并全系列。`_work/`、分册 `books/*.json` 不入库。OCR 有误差，打标前宜抽样。
+
+新概念二册试点不走全书 OCR：`python3 -m vocab_ocr.nce.pilot_nce2_from_excel`，产出 [`data/vocab/nce-vocab-index.min.json`](./data/vocab/nce-vocab-index.min.json)（同一 `v: 1`）。三、四册未做。票在 [`.scratch/english-vocab-ocr/`](./.scratch/english-vocab-ocr/)（`#01`）和 [`.scratch/nce-vocab-index/`](./.scratch/nce-vocab-index/)（`#02`）。
+
+---
+
 ## 远程
 
 - `origin` → 本 fork（`uniquejava/FreePEP`）
