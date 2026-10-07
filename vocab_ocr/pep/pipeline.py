@@ -8,8 +8,10 @@ from pathlib import Path
 from vocab_ocr.pep.catalog import BOOKS, PepBook, get_book
 from vocab_ocr.pep.locate_vocab_via_toc import locate_vocab_pages
 from vocab_ocr.pep.parse_appendix import (
+    UnitRange,
     apply_page_unit_mapping,
     entries_to_dicts,
+    map_page_to_unit,
     parse_ocr_pages,
     parse_toc_unit_starts,
 )
@@ -22,6 +24,52 @@ from vocab_ocr.shared.pdf_render import (
     require_pdftoppm,
 )
 from vocab_ocr.shared.tesseract_ocr import ocr_image, require_tesseract
+
+
+# Printed page starts read from the Contents of the exact local textbook
+# editions. The PDF page count guards against applying them to another edition.
+# End is the first page after the numbered units (Reading Plus/appendices).
+KNOWN_JUNIOR_TOC: dict[str, tuple[int, list[tuple[str, int]], int]] = {
+    "junior-7a": (140, [("starter-1", 1), ("starter-2", 7), ("starter-3", 13),
+                         ("1", 19), ("2", 27), ("3", 35), ("4", 43),
+                         ("5", 51), ("6", 59), ("7", 67)], 75),
+    "junior-7b": (132, [(str(i), 1 + 8 * (i - 1)) for i in range(1, 9)], 65),
+    "junior-8a": (150, [(str(i), 1 + 10 * (i - 1)) for i in range(1, 9)], 81),
+    "junior-8b": (154, [(str(i), 1 + 10 * (i - 1)) for i in range(1, 9)], 81),
+    "junior-9": (204, [(str(i), 1 + 8 * (i - 1)) for i in range(1, 13)], 97),
+}
+
+
+def unit_map_for_book(book_id: str, pdf_pages: int, toc_text: str = "") -> tuple[list[UnitRange], int | None]:
+    starts = parse_toc_unit_starts(toc_text)
+    if starts:
+        return starts, None
+    known = KNOWN_JUNIOR_TOC.get(book_id)
+    if known and known[0] == pdf_pages:
+        return [UnitRange(unit, page) for unit, page in known[1]], known[2]
+    return [], None
+
+
+def prepare_book_for_index(book: dict) -> dict:
+    """Correct stale A-Z unit values in cached JSON before indexing."""
+    if book.get("stage") != "junior":
+        return book
+    ranges = [UnitRange(str(r["unit"]), int(r["start_page"])) for r in book.get("unit_starts", [])]
+    end_page = None
+    if not ranges:
+        ranges, end_page = unit_map_for_book(book["book_id"], book.get("pdf_pages", 0))
+    prepared = {**book, "unit_starts": [
+        {"unit": r.unit, "start_page": r.start_page} for r in ranges
+    ]}
+    entries = []
+    for entry in book["entries"]:
+        e = entry.copy()
+        if e.get("source") == "appendix_az":
+            page = e.get("page")
+            e["unit"] = map_page_to_unit(page, ranges, end_page) if isinstance(page, int) else None
+        entries.append(e)
+    prepared["entries"] = entries
+    return prepared
 
 
 def process_book(
@@ -97,8 +145,8 @@ def process_book(
     toc_path = book_work / "ocr_toc.txt"
     if toc_path.exists() and not toc_text:
         toc_text = toc_path.read_text(encoding="utf-8", errors="replace")
-    unit_starts = parse_toc_unit_starts(toc_text)
-    entries = apply_page_unit_mapping(entries, unit_starts)
+    unit_starts, unit_end = unit_map_for_book(book.id, n_pages, toc_text)
+    entries = apply_page_unit_mapping(entries, unit_starts, unit_end)
 
     with_unit = sum(1 for e in entries if e.unit)
     result = {
@@ -132,7 +180,7 @@ def rebuild_index_from_books(out_dir: Path = DEFAULT_OUT) -> Path:
     for b in BOOKS:
         p = books_dir / f"{b.id}.json"
         if p.exists():
-            results.append(json.loads(p.read_text(encoding="utf-8")))
+            results.append(prepare_book_for_index(json.loads(p.read_text(encoding="utf-8"))))
     if not results:
         raise FileNotFoundError(f"no PEP book JSON under {books_dir}")
     return build_inverted_index(results, out_dir, basename="vocab-index")
@@ -161,7 +209,9 @@ def process_all(
     for b in to_index:
         p = books_dir / f"{b.id}.json"
         if p.exists():
-            merged.append(json.loads(p.read_text(encoding="utf-8")))
-    path = build_inverted_index(merged, DEFAULT_OUT, basename="vocab-index")
+            merged.append(prepare_book_for_index(json.loads(p.read_text(encoding="utf-8"))))
+    # A single-book run is a preview. Keep the checked-in full index intact.
+    target_dir = DEFAULT_WORK / "preview" if book_ids else DEFAULT_OUT
+    path = build_inverted_index(merged, target_dir, basename="vocab-index")
     print(f"index -> {path}")
     return path

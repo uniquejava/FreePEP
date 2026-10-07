@@ -52,7 +52,7 @@
 - [x] 产出 `nce-vocab-index.min.json`（当前仅 `nce-2`），`v: 1`，hit=`[book_id, lesson, zh]`
 - [ ] 2 / 3 / 4 三册均有 `books` 条目与词条（现阶段只做二册试点）
 - [x] hit 第二段为 **lesson** 号（抽样：private→1，postcard→3，spectacle→96）
-- [ ] README 或 `vocab_ocr` 旁注：如何复跑 / 源路径
+- [x] README 或 `vocab_ocr` 旁注：如何复跑 / 源路径
 - [x] 示例查询写入 Comments
 
 ## 非目标
@@ -75,3 +75,4 @@
 - 例：`private` → nce-2 Lesson 1「私人的」；`until` → Lesson 2；`spectacle` → Lesson 96。
 - 2026-10-08：曾整票取消；同日重启仅 nce-2 试点；人教索引亦改回 `v:1` 与 NCE 对齐。
 - 2026-10-08：已拷贝 `nce-vocab-index.min.json` → EggplantDict `Resources/`（并入 Xcode Resources）；词典打标接 `nce-*` 仍属 EggplantDict 另票，非本票。
+- 2026-10-08：脚本新增 `--xlsx`、`--lesson-vocab`，README 写明四列 Excel 和课次词表的来源及本机副本用法。

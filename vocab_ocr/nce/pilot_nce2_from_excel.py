@@ -20,6 +20,7 @@ Index hit shape (shared with PEP, vocab_ocr.shared.build_index.INDEX_VERSION):
 from __future__ import annotations
 
 import csv
+import argparse
 import json
 import re
 import urllib.request
@@ -297,7 +298,7 @@ def build_index(rows: list[dict]) -> dict:
     return index
 
 
-def run(xlsx: Path = XLSX_DEFAULT) -> dict:
+def run(xlsx: Path = XLSX_DEFAULT, lesson_vocab: Path | None = None) -> dict:
     work = DEFAULT_WORK / "nce-2"
     work.mkdir(parents=True, exist_ok=True)
 
@@ -308,7 +309,11 @@ def run(xlsx: Path = XLSX_DEFAULT) -> dict:
         w.writeheader()
         w.writerows(excel)
 
-    sohu_text = fetch_sohu(work / "sohu-lesson-vocab.txt")
+    sohu_text = (
+        lesson_vocab.read_text(encoding="utf-8")
+        if lesson_vocab is not None
+        else fetch_sohu(work / "sohu-lesson-vocab.txt")
+    )
     sohu_ordered = parse_lesson_vocab(sohu_text)
     if len({it["lesson"] for it in sohu_ordered}) < 90:
         raise RuntimeError(
@@ -443,8 +448,12 @@ def run(xlsx: Path = XLSX_DEFAULT) -> dict:
     return report
 
 
-def main() -> None:
-    report = run()
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="新概念英语二册 Excel/课次词表索引试点")
+    parser.add_argument("--xlsx", type=Path, default=XLSX_DEFAULT, help="四列词表 Excel 路径")
+    parser.add_argument("--lesson-vocab", type=Path, help="已保存的 Lesson 词表纯文本；省略时读取缓存或搜狐页面")
+    args = parser.parse_args(argv)
+    report = run(args.xlsx, args.lesson_vocab)
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 

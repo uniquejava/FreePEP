@@ -34,6 +34,10 @@ _KEEP_SHORT = {
     "it",
     "so",
     "us",
+    "sb",
+    "au",
+    "tv",
+    "uk",
 }
 _TRAILING_POS = {"a", "n", "v", "vt", "vi", "adj", "adv", "prep", "conj", "pron"}
 
@@ -56,6 +60,7 @@ def clean_zh(zh: str | None) -> str:
         maxsplit=1,
     )[0]
     s = re.split(r"\s+p\.?\s*[A-Za-z0-9]+\b", s, maxsplit=1, flags=re.I)[0]
+    s = re.split(r"(?<=[\u4e00-\u9fff])\s*[;；,，、]\s*(?=[A-Za-z]{3,}\b)", s, maxsplit=1)[0]
     s = re.split(r"(?<=[\u4e00-\u9fff])\s+(?=[A-Za-z]{3,}\b)", s, maxsplit=1)[0]
     # Drop leading non-CJK junk (OCR debris).
     s = re.sub(r"^[^\u4e00-\u9fffA-Za-z0-9（(]+", "", s)
@@ -103,6 +108,14 @@ def norm_lemma(word: str) -> str | None:
     while len(tokens) > 1 and len(tokens[-1]) <= 2 and tokens[-1] not in _KEEP_SHORT:
         tokens.pop()
     key = " ".join(tokens)
+    # OCR sometimes merges both columns and phonetic fragments into a headword.
+    # Preserve ordinary short phrases, but reject fragments and very long heads.
+    if len(tokens) > 6 or (
+        len(tokens) > 1
+        and any((len(token) <= 2 and token not in _KEEP_SHORT)
+                or token.startswith("'") for token in tokens)
+    ):
+        return None
     if key in {"a", "i", "unit", "vocabulary", "appendices", "section", "lesson"}:
         return None
     return key
@@ -129,6 +142,11 @@ def build_inverted_index(
     for book in book_results:
         books_meta[book["book_id"]] = book["title"]
         for e in book["entries"]:
+            # Older junior OCR results carried the previous unit into the A-Z
+            # appendix. Without a TOC page map, that unit cannot be trusted.
+            if (book.get("stage") == "junior" and e.get("source") == "appendix_az"
+                    and not book.get("unit_starts")):
+                continue
             key = norm_lemma(e.get("word") or "")
             if not key:
                 continue
@@ -137,6 +155,8 @@ def build_inverted_index(
                 continue
             unit_s = str(unit)
             zh = clean_zh(e.get("zh"))
+            if not zh:
+                continue
             page = e.get("page")
             hit: list = [e["book_id"], unit_s]
             if isinstance(page, int) and page > 0:

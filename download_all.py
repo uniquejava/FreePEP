@@ -46,15 +46,17 @@ def is_match_xd(b_xd: str, b_xdtype: str, target_xds: List[str]) -> bool:
     """判断教材学段是否与目标学段过滤条件匹配"""
     if not target_xds:
         return True
+    book_stage = normalize_xd(b_xd)
     for t in target_xds:
-        # 精确匹配或关键词包含匹配（如匹配 六三、五四、高中）
-        if t == b_xd or t == b_xdtype:
+        target_stage = normalize_xd(t)
+        if target_stage == book_stage:
             return True
-        if ("六三" in t and "六三" in b_xdtype) or ("六三" in t and "六三" in b_xd):
+        # “义务教育（六三/五四学制）”是明确的跨小学、初中汇总筛选。
+        if t == "义务教育（六三学制）" and "六三" in book_stage:
             return True
-        if ("五四" in t or "五·四" in t) and ("五四" in b_xdtype or "五·四" in b_xdtype or "五四" in b_xd or "五·四" in b_xd):
+        if t in ("义务教育（五四学制）", "义务教育（五·四学制）") and ("五四" in book_stage or "五·四" in book_stage):
             return True
-        if ("高中" in t) and ("高中" in b_xd or "高中" in b_xdtype):
+        if t == b_xdtype:
             return True
     return False
 
@@ -144,8 +146,8 @@ def run_download_all(output_dir: str = "./downloads",
         target_dir = os.path.join(base_out, sub_dir)
         expected_pdf = os.path.join(target_dir, f"{safe_title}.pdf")
 
-        # 检查是否已存在完整 PDF
-        if os.path.exists(expected_pdf) and os.path.getsize(expected_pdf) > 50000:
+        # 只有下载器写入完成清单的 PDF 才能在读取总页数前快速跳过。
+        if downloader._manifest_matches(expected_pdf, book_id, high_res):
             with lock:
                 processed_count += 1
                 skipped_count += 1

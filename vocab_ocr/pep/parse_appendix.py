@@ -126,6 +126,7 @@ def parse_line(
 
     if SECTION_AZ_RE.search(s) and "Each Unit" not in s:
         state.section = "az"
+        state.current_unit = None
         return None
 
     if not looks_like_vocab_line(s):
@@ -274,8 +275,10 @@ def parse_toc_unit_starts(ocr_text: str) -> list[UnitRange]:
     return [UnitRange(u, p) for u, p in sorted(by_unit.items(), key=lambda kv: kv[1])]
 
 
-def map_page_to_unit(page: int, unit_starts: list[UnitRange]) -> str | None:
-    if not unit_starts:
+def map_page_to_unit(
+    page: int, unit_starts: list[UnitRange], end_page: int | None = None
+) -> str | None:
+    if not unit_starts or (end_page is not None and page >= end_page):
         return None
     current = None
     for ur in unit_starts:
@@ -287,9 +290,9 @@ def map_page_to_unit(page: int, unit_starts: list[UnitRange]) -> str | None:
 
 
 def apply_page_unit_mapping(
-    entries: list[VocabEntry], unit_starts: list[UnitRange]
+    entries: list[VocabEntry], unit_starts: list[UnitRange], end_page: int | None = None
 ) -> list[VocabEntry]:
     for e in entries:
-        if e.unit is None and e.page is not None:
-            e.unit = map_page_to_unit(e.page, unit_starts)
+        if e.source == "appendix_az" and e.page is not None:
+            e.unit = map_page_to_unit(e.page, unit_starts, end_page)
     return entries

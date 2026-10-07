@@ -16,6 +16,7 @@ import base64
 import binascii
 import tempfile
 import pytest
+from PIL import Image
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding
 from fastapi.testclient import TestClient
@@ -191,11 +192,12 @@ def test_downloader_skip_if_exists():
     with tempfile.TemporaryDirectory() as tmp_dir:
         downloader = PepDownloader(headless=True, output_dir=tmp_dir)
         fake_pdf = os.path.join(tmp_dir, "测试教材.pdf")
-        # 写入大于 50KB 的假文件模拟已存在 PDF
-        with open(fake_pdf, "wb") as f:
-            f.write(b"%PDF-1.4 " + b"0" * 60000)
+        Image.new("RGB", (100, 100), "white").save(fake_pdf, "PDF")
+        with open(fake_pdf + ".freepep.json", "w", encoding="utf-8") as f:
+            json.dump({"book_id": "1384001301261", "pages": 1,
+                       "bytes": os.path.getsize(fake_pdf), "high_res": False}, f)
 
-        # 调用 download_book，由于文件已存在且 > 50KB，应直接秒退并返回路径，无需启动 Playwright 浏览器
+        # 完成清单与 PDF 页数一致时秒退，无需启动 Playwright 浏览器。
         result_path = downloader.download_book(
             book_id="1384001301261",
             custom_title="测试教材",

@@ -22,6 +22,7 @@ from typing import List, Dict, Optional, Callable, Tuple
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding
 from PIL import Image
+from pypdf import PdfReader
 from playwright.sync_api import sync_playwright
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -312,6 +313,60 @@ class PepDownloader:
             self.output_dir = os.path.abspath(output_dir)
         os.makedirs(self.output_dir, exist_ok=True)
 
+    @staticmethod
+    def _pdf_page_count(path: str) -> Optional[int]:
+        try:
+            with open(path, "rb") as file:
+                reader = PdfReader(file, strict=True)
+                return len(reader.pages)
+        except Exception:
+            return None
+
+    @classmethod
+    def _complete_pdf(cls, path: str, expected_pages: int) -> bool:
+        return expected_pages > 0 and cls._pdf_page_count(path) == expected_pages
+
+    @classmethod
+    def _manifest_matches(cls, path: str, book_id: str, high_res: bool) -> bool:
+        try:
+            with open(path + ".freepep.json", "r", encoding="utf-8") as file:
+                manifest = json.load(file)
+            if manifest.get("book_id") != str(book_id):
+                return False
+            if high_res and not manifest.get("high_res"):
+                return False
+            if manifest.get("bytes") != os.path.getsize(path):
+                return False
+            return cls._complete_pdf(path, manifest.get("pages", 0))
+        except (OSError, ValueError, TypeError):
+            return False
+
+    @classmethod
+    def assemble_pdf(cls, image_files: List[str], expected_pages: int, output_pdf: str) -> bool:
+        """Publish only an intact PDF containing every expected page."""
+        if expected_pages <= 0 or len(image_files) != expected_pages:
+            return False
+        images = []
+        temporary_pdf = output_pdf + ".partial"
+        try:
+            for path in image_files:
+                with Image.open(path) as source:
+                    source.load()
+                    images.append(source.convert("RGB"))
+            images[0].save(temporary_pdf, "PDF", resolution=100.0,
+                           save_all=True, append_images=images[1:])
+            if not cls._complete_pdf(temporary_pdf, expected_pages):
+                return False
+            os.replace(temporary_pdf, output_pdf)
+            return True
+        except (OSError, ValueError):
+            return False
+        finally:
+            for image in images:
+                image.close()
+            if os.path.exists(temporary_pdf):
+                os.remove(temporary_pdf)
+
     def _solve_slider(self, page, log_cb: Optional[Callable[[str], None]] = None) -> bool:
         """检测并高可靠破解阿里云 WAF 滑块（支持自动重试与防伪装刷新）"""
         for check_i in range(3):
@@ -410,11 +465,12 @@ class PepDownloader:
         target_dir = os.path.join(self.output_dir, sub_dir) if sub_dir else self.output_dir
         os.makedirs(target_dir, exist_ok=True)
 
-        # 检查是否已存在完整 PDF（断点续传/跳过机制）
+        # Only our completion manifest permits a fast skip before the reader
+        # tells us the expected page count. Legacy files are checked below.
         if custom_title and skip_if_exists:
             safe_title = re.sub(r'[\/:*?"<>|]', '_', custom_title).strip()
             target_pdf = os.path.join(target_dir, f"{safe_title}.pdf")
-            if os.path.exists(target_pdf) and os.path.getsize(target_pdf) > 50000:
+            if self._manifest_matches(target_pdf, book_id, high_res):
                 skip_msg = f"[✔] 本地已存在 《{safe_title}》 ({os.path.getsize(target_pdf) // 1024} KB)，自动跳过。"
                 if log_cb: log_cb(skip_msg)
                 else: print(skip_msg)
@@ -487,7 +543,8 @@ class PepDownloader:
 
             # 再次检查目标 PDF 是否存在
             target_pdf = os.path.join(target_dir, f"{safe_title}.pdf")
-            if skip_if_exists and os.path.exists(target_pdf) and os.path.getsize(target_pdf) > 50000:
+            if (skip_if_exists and self._complete_pdf(target_pdf, total_pages)
+                    and (not high_res or self._manifest_matches(target_pdf, book_id, True))):
                 skip_msg = f"[✔] 本地已存在 《{safe_title}》 ({os.path.getsize(target_pdf) // 1024} KB)，自动跳过。"
                 if log_cb: log_cb(skip_msg)
                 else: print(skip_msg)
@@ -517,13 +574,18 @@ class PepDownloader:
                 fallback_url = f"https://book.pep.com.cn/{book_id}/files/mobile/{page_num}.jpg" if high_res else None
                 img_path = os.path.join(temp_dir, f"{page_num}.jpg")
 
-                # 本地已有合法 JPEG 则跳过
+                # Reuse only decodable JPEGs; a truncated cache must be fetched again.
                 if os.path.exists(img_path) and os.path.getsize(img_path) > 15000:
-                    with open(img_path, "rb") as f:
-                        if f.read(2) == b"\xff\xd8":
+                    try:
+                        with Image.open(img_path) as cached:
+                            if cached.format != "JPEG":
+                                raise ValueError("not JPEG")
+                            cached.load()
                             image_files.append(img_path)
                             if progress_cb: progress_cb(page_num, total_pages, f"第 {page_num}/{total_pages} 页已存在")
                             continue
+                    except (OSError, ValueError):
+                        os.remove(img_path)
 
                 download_success = False
                 for retry in range(4):
@@ -610,7 +672,10 @@ class PepDownloader:
 
             browser.close()
 
-            if not image_files:
+            if len(image_files) != total_pages:
+                fail_msg = f"[-] 《{safe_title}》缺少 {total_pages - len(image_files)} 页；保留已下载切片供下次续传。"
+                if log_cb: log_cb(fail_msg)
+                else: print(fail_msg)
                 return None
 
             output_pdf = target_pdf
@@ -620,22 +685,23 @@ class PepDownloader:
                 else: print(merge_msg)
             if progress_cb: progress_cb(total_pages, total_pages, "正在合成 PDF 文件...")
 
-            pil_images = []
-            for img_p in image_files:
-                try:
-                    im = Image.open(img_p)
-                    if im.mode != "RGB":
-                        im = im.convert("RGB")
-                    pil_images.append(im)
-                except Exception as e:
-                    pass
-
-            if not pil_images:
+            if not self.assemble_pdf(image_files, total_pages, output_pdf):
+                fail_msg = f"[-] 《{safe_title}》PDF 校验失败；保留切片供下次续传。"
+                if log_cb: log_cb(fail_msg)
+                else: print(fail_msg)
                 return None
 
-            first_im = pil_images[0]
-            rest_images = pil_images[1:]
-            first_im.save(output_pdf, "PDF", resolution=100.0, save_all=True, append_images=rest_images)
+            manifest = {
+                "book_id": str(book_id),
+                "pages": total_pages,
+                "bytes": os.path.getsize(output_pdf),
+                "high_res": bool(high_res),
+            }
+            manifest_path = output_pdf + ".freepep.json"
+            temporary_manifest = manifest_path + ".partial"
+            with open(temporary_manifest, "w", encoding="utf-8") as file:
+                json.dump(manifest, file, ensure_ascii=False)
+            os.replace(temporary_manifest, manifest_path)
 
             # 下载合成完毕后，自动清理单页图片切片，释放磁盘空间
             if clean_temp and os.path.exists(temp_dir):
