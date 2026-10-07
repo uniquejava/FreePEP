@@ -1,4 +1,4 @@
-"""Build a book-only New Concept English index from four structured Excel lists.
+"""Build New Concept English index from Excel, optionally adding PDF lessons.
 
 The v:1 hit keeps its existing three fields: [book_id, lesson, zh]. Empty
 lesson and zh mean this source only establishes book-level membership.
@@ -67,6 +67,35 @@ def build_index(rows_by_book: dict[str, list[dict[str, str]]]) -> dict:
     }
 
 
+def add_pdf_lessons(index: dict, work: Path) -> dict[str, int]:
+    """Add only headwords directly matched in the PDF vocabulary blocks."""
+    counts = {}
+    for book in (1, 2, 3):
+        book_id = f"nce-{book}"
+        path = work / book_id / "lesson-matches.json"
+        if book == 1 and not path.exists():
+            continue
+        entries = json.loads(path.read_text(encoding="utf-8"))
+        expected = {1: 144, 2: 96, 3: 60}[book]
+        if [entry["lesson"] for entry in entries] != list(range(1, expected + 1)):
+            raise ValueError(f"incomplete or unordered lesson matches: {path}")
+        lessons_by_word: dict[str, set[int]] = defaultdict(set)
+        for entry in entries:
+            lesson = entry["lesson"]
+            for word in entry["matches"]:
+                if word not in index["w"] or not any(hit[0] == book_id for hit in index["w"][word]):
+                    raise ValueError(f"PDF match absent from source Excel: {book_id} {word}")
+                lessons_by_word[word].add(lesson)
+        for word, lessons in lessons_by_word.items():
+            hits = index["w"][word]
+            index["w"][word] = [hit for hit in hits if hit[0] != book_id] + [
+                [book_id, str(lesson), ""] for lesson in sorted(lessons)
+            ]
+            index["w"][word].sort(key=lambda hit: hit[0])
+        counts[book_id] = len(lessons_by_word)
+    return counts
+
+
 def write_index(index: dict, output: Path) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_name(output.name + ".tmp")
@@ -79,17 +108,20 @@ def write_index(index: dict, output: Path) -> Path:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="从四册 Excel 生成新概念英语册级词源索引")
+    parser = argparse.ArgumentParser(description="从四册 Excel 生成新概念词源索引，可选 PDF 课次证据")
     parser.add_argument("--source-dir", type=Path, default=SOURCE_DIR, help="四份新版 Excel 所在目录")
     parser.add_argument("--output", type=Path, default=OUTPUT, help="输出的紧凑 JSON 文件")
+    parser.add_argument("--pdf-lessons-work", type=Path, help="已核对的 PDF 课次匹配目录；缺证据的词保留册级命中")
     args = parser.parse_args(argv)
     rows_by_book = load_book_rows(args.source_dir)
     index = build_index(rows_by_book)
+    lesson_counts = add_pdf_lessons(index, args.pdf_lessons_work) if args.pdf_lessons_work else {}
     output = write_index(index, args.output)
     print(json.dumps({
         "output": str(output),
         "source_rows": {book_id: len(rows) for book_id, rows in rows_by_book.items()},
         "lemmas": len(index["w"]),
+        "pdf_lesson_lemmas": lesson_counts,
     }, ensure_ascii=False))
 
 
