@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from vocab_ocr.nce.align_pdf_lessons import pdf_page
+from vocab_ocr.nce.align_pdf_lessons import matches, pdf_page, vocab_block_four
 from vocab_ocr.nce.build_book_index import BOOK_FILES, add_pdf_lessons, build_index
 
 
@@ -32,6 +32,8 @@ class NceBookIndexTests(unittest.TestCase):
                          [15, 107, 125, 217, 235, 327, 345, 437])
         self.assertEqual([pdf_page(3, n) for n in (1, 20, 21, 40, 41, 60)],
                          [16, 92, 108, 184, 194, 270])
+        self.assertEqual([pdf_page(4, n) for n in (1, 8, 9, 24, 25, 32, 33, 48)],
+                         [34, 76, 82, 167, 178, 217, 224, 309])
         rows = {book_id: [{"word": "shared"}, {"word": "unknown"}]
                 for book_id, _, _ in BOOK_FILES}
         index = build_index(rows)
@@ -52,6 +54,43 @@ class NceBookIndexTests(unittest.TestCase):
         self.assertEqual(index["w"]["unknown"], [
             ["nce-1", "", ""], ["nce-2", "", ""],
             ["nce-3", "", ""], ["nce-4", "", ""],
+        ])
+
+    def test_fourth_book_glossary_can_start_on_either_page(self) -> None:
+        block, complete, offset = vocab_block_four([
+            "Lesson 1 text", "New words and expressions\nfossil man (title)\nNotes on the text",
+        ])
+        self.assertEqual((complete, offset), (True, 1))
+        self.assertIn("fossil man (title)", block)
+        block, complete, offset = vocab_block_four([
+            "Lesson 48\nNew words and expression\nportfolio (title)",
+            "priority (ll.14-15)\nNotes on the text\nMore text",
+        ])
+        self.assertEqual((complete, offset), (True, 0))
+        self.assertIn("priority (ll.14-15)", block)
+        self.assertEqual(matches("tipster (l.1) /'tipsta/\n"
+                                 "Notes on the text\npriority (l.14)\n"
+                                 "pedestrian (l.20) /pa'destrian/",
+                                 ["tipster", "priority", "pedestrian"], 4),
+                         ["tipster", "pedestrian"])
+
+    def test_fourth_book_lesson_hits_keep_repeated_words(self) -> None:
+        rows = {book_id: [{"word": "shared"}] for book_id, _, _ in BOOK_FILES}
+        index = build_index(rows)
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            for book, count in ((2, 96), (3, 60), (4, 48)):
+                path = work / f"nce-{book}" / "lesson-matches.json"
+                path.parent.mkdir()
+                path.write_text(json.dumps([
+                    {"lesson": lesson, "matches": ["shared"] if book == 4 and lesson in (1, 48) else []}
+                    for lesson in range(1, count + 1)
+                ]), encoding="utf-8")
+            self.assertEqual(add_pdf_lessons(index, work),
+                             {"nce-2": 0, "nce-3": 0, "nce-4": 1})
+        self.assertEqual(index["w"]["shared"], [
+            ["nce-1", "", ""], ["nce-2", "", ""], ["nce-3", "", ""],
+            ["nce-4", "1", ""], ["nce-4", "48", ""],
         ])
 
 

@@ -70,13 +70,13 @@ def build_index(rows_by_book: dict[str, list[dict[str, str]]]) -> dict:
 def add_pdf_lessons(index: dict, work: Path) -> dict[str, int]:
     """Add only headwords directly matched in the PDF vocabulary blocks."""
     counts = {}
-    for book in (1, 2, 3):
+    for book in (1, 2, 3, 4):
         book_id = f"nce-{book}"
         path = work / book_id / "lesson-matches.json"
-        if book == 1 and not path.exists():
+        if book in (1, 4) and not path.exists():
             continue
         entries = json.loads(path.read_text(encoding="utf-8"))
-        expected = {1: 144, 2: 96, 3: 60}[book]
+        expected = {1: 144, 2: 96, 3: 60, 4: 48}[book]
         if [entry["lesson"] for entry in entries] != list(range(1, expected + 1)):
             raise ValueError(f"incomplete or unordered lesson matches: {path}")
         lessons_by_word: dict[str, set[int]] = defaultdict(set)

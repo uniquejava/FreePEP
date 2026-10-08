@@ -100,7 +100,7 @@ python3 -m vocab_ocr pep --book junior-8a --force  # 单册预览写入 data/voc
 python3 -m vocab_ocr pep --rebuild-index       # 仅从 books/*.json 重打包旧 OCR 预览
 ```
 
-人教与新概念共用索引 schema `v: 1`：每条 hit 末尾是中文释义字符串；没有可靠教材释义时为空字符串。人教同一词在两单元出现则保留两条 hit，新概念当前按册去重。词性不进索引。
+人教与新概念共用索引 schema `v: 1`：每条 hit 末尾是中文释义字符串；没有可靠教材释义时为空字符串。同一词在多单元或多课出现时保留多条 hit。词性不进索引。
 
 ```json
 {
@@ -127,18 +127,19 @@ python3 -m vocab_ocr.pep.audit
 
 整页视觉转录是尚未完成的实验流程。复制 `.env.sample` 为本机 `.env`，设置 `LM_STUDIO_BASE_URL`，并先在 LM Studio 中启动对应视觉模型。`python3 -m vocab_ocr pep --vision --book junior-8a --vision-page 126` 只生成 `_work/vision/` 候选；`--check-vision` 报告质量阻碍。`--publish-vision` 仅在 12 册及原页人工复核全部过关时发布，目前不能据此更新正式索引。
 
-新概念经典新版 1–4 册的词头来自 [lilinji/English](https://github.com/lilinji/English) 的四份 Excel。第 1–3 册再对照本机课文 PDF 的目录页和每课词表页填入已核对的 Lesson；第 4 册仍只有册级信息。源仓库 README 标注 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)；本索引是来源词表的派生数据，按来源许可使用，与仓库代码的 MIT 许可分开。不提交原 Excel、PDF 或 OCR 缓存。每条 hit 保持 `v:1` 的三段结构 `[book_id, lesson, ""]`；未确认课次时第二段为空。Excel 的通用词典释义不等于教材释义，所以第三段仍为空。
+新概念经典新版 1–4 册的词头来自 [lilinji/English](https://github.com/lilinji/English) 的四份 Excel，再对照本机课文 PDF 的目录页和每课词表页填入已核对的 Lesson。第 4 册必须使用保留封面和前言的 `新概念4-完整.pdf`；同目录的 49 页 `新概念4.pdf` 不是这本完整扫描版。源仓库 README 标注 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)；本索引是来源词表的派生数据，按来源许可使用，与仓库代码的 MIT 许可分开。不提交原 Excel、PDF 或 OCR 缓存。每条 hit 保持 `v:1` 的三段结构 `[book_id, lesson, ""]`；未确认课次时第二段为空。Excel 的通用词典释义不等于教材释义，所以第三段仍为空。
 
 ```bash
 python3 -m vocab_ocr.nce.align_pdf_lessons 2 --pdf-dir '/Users/cyper/Pdf/新概念课文1-4PDF'
 python3 -m vocab_ocr.nce.align_pdf_lessons 3 --pdf-dir '/Users/cyper/Pdf/新概念课文1-4PDF'
 python3 -m vocab_ocr.nce.align_pdf_lessons 1 --pdf-dir '/Users/cyper/Pdf/新概念课文1-4PDF'
+python3 -m vocab_ocr.nce.align_pdf_lessons 4 --pdf-dir '/Users/cyper/Pdf/新概念课文1-4PDF'
 python3 -m vocab_ocr.nce.build_book_index --source-dir '/path/to/8.新概念英语' --pdf-lessons-work data/vocab/_work/nce-pdf-lessons
 ```
 
-默认 Excel 目录是 `~/code/English/8.新概念英语/`，输出为 [`data/vocab/nce-vocab-index.min.json`](./data/vocab/nce-vocab-index.min.json)。缺任一册 Excel 时生成器会失败，保留现有索引。`align_pdf_lessons` 只读目录指定的课次页：第 2 册 PDF 页序＝印刷页码＋3；第 3 册＝＋2；第 1 册 Lesson 1–72＝＋4、73–144＝＋8，词表在课文起页的下一页。第 2、3 册偶数课也有词表；第 1 册部分偶数课没有。第 3 册长课的词表可能跨到下一页，脚本会补读该页。OCR 候选和复核表写在忽略入库的 `data/vocab/_work/nce-pdf-lessons/nce-*/`。不加 `--pdf-lessons-work` 时，生成器会重建纯册级索引。
+默认 Excel 目录是 `~/code/English/8.新概念英语/`，输出为 [`data/vocab/nce-vocab-index.min.json`](./data/vocab/nce-vocab-index.min.json)。缺任一册 Excel 时生成器会失败，保留现有索引。`align_pdf_lessons` 只读目录指定的课次页：第 2 册 PDF 页序＝印刷页码＋3；第 3 册＝＋2；第 1 册 Lesson 1–72＝＋4、73–144＝＋8，词表在课文起页的下一页。第 4 册目录在 PDF 第 28–29 页，Lesson 1–48 的起始印刷页码间距不固定，PDF 页序＝印刷页码＋29；词表可能从课文起页或下一页开始，还可能跨栏或续页。第 2、3、4 册偶数课也有词表；第 1 册部分偶数课没有。OCR 候选和复核表写在忽略入库的 `data/vocab/_work/nce-pdf-lessons/nce-*/`。不加 `--pdf-lessons-work` 时，生成器会重建纯册级索引。
 
-**核对进度（2026-10-08）**：第 2、3 册现有 Excel 词头分别 840/840、1050/1050 已有课次，少量 OCR 漏读词已对照 PDF 目视补录；同一词在多课词表出现时保留多条 hit。第 1 册 867 个词头中有 700 个直接匹配或目视核对词表，余下 167 个保留空课次，见本机 `nce-1/review.csv`。第 4 册仍是册级。第 2 册 Excel `content` 对应课文词表 `contents`、`the press` 对应 `Press`，两项已目视核到课次，词头仍保持 Excel 原样。原二册 `python3 -m vocab_ocr.nce.pilot_nce2_from_excel` 只写入 `_work/nce-2/` 历史预览，不覆盖正式索引。票在 [`.scratch/english-vocab-ocr/`](./.scratch/english-vocab-ocr/)（`#01`）、[`.scratch/nce-vocab-index/`](./.scratch/nce-vocab-index/)（`#02`、`#06`）。
+**核对进度（2026-10-08）**：第 2、3、4 册现有 Excel 词头分别 840/840、1050/1050、784/784 已有课次，少量 OCR 漏读词已对照 PDF 目视补录；同一词在多课词表出现时保留多条 hit。第 1 册 867 个词头中有 700 个直接匹配或目视核对词表，余下 167 个保留空课次，见本机 `nce-1/review.csv`。第 2 册 Excel `content` 对应课文词表 `contents`、`the press` 对应 `Press`，两项已目视核到课次，词头仍保持 Excel 原样。原二册 `python3 -m vocab_ocr.nce.pilot_nce2_from_excel` 只写入 `_work/nce-2/` 历史预览，不覆盖正式索引。票在 [`.scratch/english-vocab-ocr/`](./.scratch/english-vocab-ocr/)（`#01`）、[`.scratch/nce-vocab-index/`](./.scratch/nce-vocab-index/)（`#02`、`#06`、`#07`）。
 
 ---
 

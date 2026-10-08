@@ -1,7 +1,7 @@
-"""Locate NCE 1/2/3 vocabulary using the printed table-of-contents pages.
+"""Locate NCE 1–4 vocabulary using the printed table-of-contents pages.
 
 The source PDFs are image-only. This tool OCRs only the table-of-contents
-lesson starts or their next page, where the vocabulary section begins.
+lesson starts and, when needed, up to two following pages for vocabulary.
 It writes review data under the ignored _work directory, never the final index.
 """
 
@@ -31,7 +31,24 @@ VISUALLY_CHECKED = {
     2: {"modern": 23, "retire": 31, "content": 44, "circus": 65,
         "remote": 66, "the press": 84},
     3: {"philosopher": 27, "pot-holer": 42, "lull": 44, "safeguard": 53},
+    4: {"flint": 1, "rot": 1, "orgy": 6, "alfred": 9, "at&t": 10,
+        "block and tackle": 13, "cutting bit": 13, "carnivore": 20,
+        "like": 23, "leaning tower of pisa": 32, "lunar": 35,
+        "interstellar": 43, "preferential": 44, "maître d'hôtel": 47,
+        "vie": 47, "tipster": 48, "broker": 48, "heady": 48,
+        "pedestrian": 48},
 }
+
+# Transcribed from the two contents pages (PDF pages 28–29) of the complete
+# scan. Unlike the first three books, fourth-book lessons are not evenly spaced.
+NCE4_PRINTED_PAGES = (
+    5, 11, 17, 23, 29, 35, 41, 47, 53, 59, 65, 70,
+    76, 82, 87, 92, 98, 104, 110, 115, 121, 127, 132, 138,
+    149, 155, 160, 166, 172, 177, 183, 188, 195, 201, 207, 213,
+    218, 223, 228, 234, 240, 245, 251, 257, 263, 268, 274, 280,
+)
+VOCAB_HEADING = re.compile(r"News?\s+words\s+and\s+expressions?", re.I)
+NOTES_HEADING = re.compile(r"No[tf]es\s+on\s+the\s+text", re.I)
 
 
 def printed_page(book: int, lesson: int) -> int:
@@ -43,13 +60,15 @@ def printed_page(book: int, lesson: int) -> int:
     if book == 3 and 1 <= lesson <= 60:
         unit = (lesson - 1) // 20
         return (14, 106, 192)[unit] + 4 * ((lesson - 1) % 20)
+    if book == 4 and 1 <= lesson <= 48:
+        return NCE4_PRINTED_PAGES[lesson - 1]
     raise ValueError((book, lesson))
 
 
 def pdf_page(book: int, lesson: int) -> int:
     if book == 1:
         return printed_page(book, lesson) + (4 if lesson <= 72 else 8)
-    return printed_page(book, lesson) + {2: 3, 3: 2}[book]
+    return printed_page(book, lesson) + {2: 3, 3: 2, 4: 29}[book]
 
 
 def ocr_page(pdf: Path, page: int, cache: Path) -> str:
@@ -76,31 +95,56 @@ def ocr_page(pdf: Path, page: int, cache: Path) -> str:
 
 
 def vocab_block(text: str) -> tuple[str, bool]:
-    start = re.search(r"News?\s+words\s+and\s+expressions", text, re.I)
+    start = VOCAB_HEADING.search(text)
     if not start:
         return "", False
-    end = re.search(r"No[tf]es\s+on\s+the\s+text", text[start.end():], re.I)
+    end = NOTES_HEADING.search(text[start.end():])
     # Tesseract may read the left column, then Notes, then the right column.
     # Keep the page tail and require a printed line-reference marker below.
     return text[start.end():], bool(end)
 
 
 def vocab_block_one(text: str) -> tuple[str, bool]:
-    start = re.search(r"News?\s+words\s+and\s+expressions", text, re.I)
+    start = VOCAB_HEADING.search(text)
     if not start:
         return "", False
     end = re.search(r"(?:No[tf]es\s+on\s+the\s+text|Written\s+exercises?)", text[start.end():], re.I)
     return (text[start.end():start.end() + end.start()], True) if end else (text[start.end():], False)
 
 
+def vocab_block_four(pages: list[str]) -> tuple[str, bool, int | None]:
+    """Keep the glossary page, including columns OCR placed after Notes."""
+    parts = []
+    heading_page = None
+    for offset, text in enumerate(pages):
+        if heading_page is None:
+            start = VOCAB_HEADING.search(text)
+            if not start:
+                continue
+            heading_page = offset
+            text = text[start.end():]
+        end = NOTES_HEADING.search(text)
+        # OCR may read the left glossary column, then Notes, then the right
+        # glossary column. The matching rule below requires an IPA slash, so
+        # prose and vocabulary exercises elsewhere on this page are excluded.
+        parts.append(text)
+        if end:
+            return "\n".join(parts), True, heading_page
+    return "\n".join(parts), False, heading_page
+
+
 def matches(block: str, words: list[str], book: int) -> list[str]:
     """Find known Excel headwords followed by a glossary pronunciation/reference."""
     found = []
     for word in words:
-        # NCE 1 has IPA after the headword; NCE 2/3 print a line reference.
+        # NCE 1 has IPA after the headword; NCE 2–4 print a line reference.
         head = r"(?<![A-Za-z])" + re.escape(word).replace(r"\ ", r"\s+")
-        pattern = (head + r"\s+\S{0,8}/") if book == 1 else (
-            head + r"\.?\s*\((?:title|[lI1][.\s]?\d|\d)")
+        if book == 1:
+            pattern = head + r"\s+\S{0,8}/"
+        elif book == 4:
+            pattern = head + r"\.?\s*\((?:title|[lI1]{0,2}[.,\s]?\d)[^)\n]{0,10}\)\.?[^\n]{0,15}/"
+        else:
+            pattern = head + r"\.?\s*\((?:title|[lI1]{1,2}[.\s]?\d|\d)"
         if re.search(pattern, block, re.I):
             found.append(word)
     return found
@@ -153,23 +197,33 @@ def run(book: int, pdf_dir: Path, source_dir: Path, work: Path) -> dict:
     rows_by_book = load_book_rows(source_dir)
     source_rows = [norm_lemma(r["word"]) for r in rows_by_book[book_id]]
     words = list(dict.fromkeys(source_rows))
-    pdf = pdf_dir / f"新概念{book}.pdf"
-    count = {1: 144, 2: 96, 3: 60}[book]
+    pdf = pdf_dir / ("新概念4-完整.pdf" if book == 4 else f"新概念{book}.pdf")
+    count = {1: 144, 2: 96, 3: 60, 4: 48}[book]
     results = []
     for lesson in range(1, count + 1):
         first = pdf_page(book, lesson)
-        page = first + 1 if book == 1 else first
-        text = ocr_page(pdf, page, work / f"nce-{book}" / f"p{page}.txt")
-        block, complete = (vocab_block_one(text) if book == 1 else vocab_block(text))
-        if not block and book != 1:
-            page += 1
-            text = ocr_page(pdf, page, work / f"nce-{book}" / f"p{page}.txt")
-            block, complete = vocab_block(text)
-        elif not complete and book != 1 and block:
-            continuation = ocr_page(pdf, page + 1, work / f"nce-{book}" / f"p{page + 1}.txt")
-            end = re.search(r"No[tf]es\s+on\s+the\s+text", continuation, re.I)
-            block += "\n" + continuation
-            complete = bool(end)
+        if book == 4:
+            next_first = pdf_page(book, lesson + 1) if lesson < count else 315
+            texts = []
+            for target in range(first, min(first + 3, next_first)):
+                texts.append(ocr_page(pdf, target, work / book_id / f"p{target}.txt"))
+                block, complete, heading_offset = vocab_block_four(texts)
+                if complete:
+                    break
+            page = first + heading_offset if heading_offset is not None else first
+        else:
+            page = first + 1 if book == 1 else first
+            text = ocr_page(pdf, page, work / book_id / f"p{page}.txt")
+            block, complete = (vocab_block_one(text) if book == 1 else vocab_block(text))
+            if not block and book != 1:
+                page += 1
+                text = ocr_page(pdf, page, work / book_id / f"p{page}.txt")
+                block, complete = vocab_block(text)
+            elif not complete and book != 1 and block:
+                continuation = ocr_page(pdf, page + 1, work / book_id / f"p{page + 1}.txt")
+                end = NOTES_HEADING.search(continuation)
+                block += "\n" + continuation
+                complete = bool(end)
         hits = matches(block, words, book)
         results.append({
             "lesson": lesson, "printed_page": printed_page(book, lesson),
@@ -209,7 +263,7 @@ def run(book: int, pdf_dir: Path, source_dir: Path, work: Path) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("book", type=int, choices=(1, 2, 3))
+    parser.add_argument("book", type=int, choices=(1, 2, 3, 4))
     parser.add_argument("--pdf-dir", type=Path, default=PDF_DIR)
     parser.add_argument("--source-dir", type=Path, default=SOURCE_DIR)
     parser.add_argument("--work", type=Path, default=WORK)
