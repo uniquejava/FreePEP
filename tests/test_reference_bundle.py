@@ -12,8 +12,9 @@ from pypdf.generic import DecodedStreamObject, NameObject
 
 from vocab_ocr.reference import (
     build_bundle, export_regions, install_bundle, junior_unit, lemma, publish_indexes, read_corpus, record_page,
-    sha256, validate_bundle, write_json,
+    pos_status, sha256, validate_bundle, write_json,
 )
+from vocab_ocr.pos import printed_tags
 
 
 class ReferenceBundleTests(unittest.TestCase):
@@ -50,6 +51,104 @@ class ReferenceBundleTests(unittest.TestCase):
         manifest = json.loads((self.output / "manifest.json").read_text())
         manifest["files"] = {name: sha256(self.output / name) for name in manifest["files"]}
         write_json(self.output / "manifest.json", manifest)
+
+    def add_pos_review(self):
+        # These test-only images stand in for directly reviewed crop evidence.
+        build_bundle(self.work, self.output)
+        crops = self.work.parent / "vocab-page-regions"
+        export_regions(self.output, crops, dpi=72)
+        for path in self.work.glob("books/*/pages/*.json"):
+            record = json.loads(path.read_text())
+            if record["kind"] != "vocab":
+                continue
+            crop = crops / path.parents[1].name / f"{record['source_pdf_page'] - 1:03d}-top.json"
+            record["pos_review"] = {"reviewed_by": "codex-direct-vision", "regions": {
+                "top": {"metadata_sha256": sha256(crop), "image_sha256": sha256(crop.with_suffix('.png'))}}}
+            for entry in record["entries"]:
+                entry["pos"] = {"status": "printed", "raw": "adj.", "tags": ["adjective"]}
+            write_json(path, record)
+
+    def test_pos_conflicts_split_occurrences_and_aliases_keep_evidence(self):
+        self.add_pos_review()
+        path = self.work / "books/senior-fixture/pages/003.json"
+        record = json.loads(path.read_text())
+        record["entries"][0].update(pos={"status": "printed", "raw": "n.", "tags": ["noun"]}, aliases=["atomic"])
+        write_json(path, record)
+        self.assertEqual(pos_status(read_corpus(self.work)[1])["senior-fixture"]["conflicts"], 1)
+        build_bundle(self.work, self.output)
+        index = json.loads((self.output / "pep-vocab-index.min.json").read_text())
+        self.assertEqual(index["pos_version"], 1)
+        hits = index["w"]["nuclear"]
+        self.assertEqual([h["pos"]["tags"] for h in hits], [["adjective"], ["noun"]])
+        self.assertEqual([h["pdf_pages"] for h in hits], [[1], [2]])
+        self.assertEqual(index["w"]["atomic"], [hits[1]])
+        self.assertEqual(hits[1]["pos_evidence"][0]["source_pdf_page"], 3)
+
+    def test_pos_continuation_uses_the_actual_printed_source(self):
+        self.add_pos_review()
+        path = self.work / "books/senior-fixture/pages/003.json"
+        record = json.loads(path.read_text())
+        record["entries"][0]["pos"]["inherited_from"] = {
+            "source_pdf_page": 2, "region_id": "top", "entry_index": 0}
+        write_json(path, record)
+        build_bundle(self.work, self.output)
+        hit = json.loads((self.output / "pep-vocab-index.min.json").read_text())["w"]["nuclear"][0]
+        self.assertEqual(hit["pdf_pages"], [1, 2])
+        self.assertEqual([e["source_pdf_page"] for e in hit["pos_evidence"]], [2])
+        record["entries"][0]["pos"]["inherited_from"]["source_pdf_page"] = 3
+        write_json(path, record)
+        with self.assertRaisesRegex(ValueError, "cyclic continuation"):
+            build_bundle(self.work, self.output)
+
+    def test_partial_or_stale_pos_review_cannot_publish(self):
+        self.add_pos_review()
+        path = self.work / "books/senior-fixture/pages/003.json"
+        original = json.loads(path.read_text())
+        record = json.loads(path.read_text())
+        del record["entries"][0]["pos"]
+        write_json(path, record)
+        with self.assertRaisesRegex(ValueError, "POS review missing"):
+            build_bundle(self.work, self.output)
+        write_json(path, original)
+        crop = self.work.parent / "vocab-page-regions/senior-fixture/002-top.png"
+        crop.write_bytes(crop.read_bytes() + b"changed")
+        with self.assertRaisesRegex(ValueError, "POS crop source/image identity"):
+            build_bundle(self.work, self.output)
+
+    def test_pos_corruption_is_rejected_even_after_rehash(self):
+        self.add_pos_review()
+        build_bundle(self.work, self.output)
+        path = self.output / "pep-vocab-index.min.json"
+        original = json.loads(path.read_text())
+        for mutate in (lambda h: h["pos"].update(tags=["verb"]),
+                       lambda h: h["pos_evidence"][0].update(source_pdf_page=4),
+                       lambda h: h["pos_evidence"][0].update(image_sha256="0" * 64),
+                       lambda h: h.update(pos_evidence=[None]),
+                       lambda h: h["pos"].update(senses=[{"raw": "n.", "tags": ["noun"], "zh": "核"}]),
+                       lambda h: h.pop("pos")):
+            index = json.loads(json.dumps(original))
+            mutate(index["w"]["nuclear"][0])
+            write_json(path, index)
+            self.rehash_manifest()
+            with self.assertRaisesRegex(ValueError, "POS"):
+                validate_bundle(self.output)
+
+    def test_printed_labels_preserve_verb_granularity(self):
+        self.assertEqual(printed_tags("vt. & vi."), ["transitive_verb", "intransitive_verb"])
+        self.assertEqual(printed_tags("modal v."), ["modal_verb"])
+        self.assertEqual(printed_tags("possessive adjective"), ["adjective"])
+        self.assertEqual(printed_tags("predicative adj."), ["adjective"])
+        self.assertEqual(printed_tags("quantifier"), ["determiner"])
+
+    def test_evidence_without_pos_extension_cannot_install(self):
+        build_bundle(self.work, self.output)
+        path = self.output / "pep-vocab-index.min.json"
+        index = json.loads(path.read_text())
+        index["w"]["nuclear"][0]["pos_evidence"] = [None]
+        write_json(path, index)
+        self.rehash_manifest()
+        with self.assertRaisesRegex(ValueError, "POS occurrence requires"):
+            validate_bundle(self.output)
 
     def test_whole_pages_order_continuation_and_relocation(self):
         result = build_bundle(self.work, self.output)

@@ -15,6 +15,7 @@ import os
 import shutil
 import tempfile
 import unicodedata
+from collections import Counter, defaultdict
 from pathlib import Path
 
 from pypdf import PdfReader, PdfWriter
@@ -22,6 +23,7 @@ from pypdf import PdfReader, PdfWriter
 from vocab_ocr.pep.catalog import BOOKS
 from vocab_ocr.pep.parse_appendix import UnitRange, map_page_to_unit
 from vocab_ocr.shared.paths import DEFAULT_WORK, DOWNLOADS
+from vocab_ocr.pos import POS_VERSION, identity as pos_identity, review_regions, resolve_source, semantics, validate_pos, valid_digest
 
 WORK = DEFAULT_WORK / "reference-rebuild"
 OUTPUT = DOWNLOADS / "vocab-reference"
@@ -112,6 +114,8 @@ def validate_record(record: dict, book: dict, page: int) -> None:
     ids = {r["id"] for r in record["regions"]}
     lesson = next((p["unit"] for p in book["pages"] if p["source_pdf_page"] == page), None)
     for entry in entries:
+        if "pos" in entry:
+            validate_pos(entry["pos"])
         if (entry.get("lemma") != lemma(entry["word"]) or not entry.get("unit") or
                 not entry.get("zh") or entry.get("region_id") not in ids):
             raise ValueError(f"invalid source entry: {entry}")
@@ -166,8 +170,10 @@ def prepare(work: Path = WORK, nce_dir: Path | None = None) -> dict:
         }
     plan = {"v": 1, "reader": "codex-direct-vision", "books": books}
     destination = work / "sources.json"
-    if destination.exists() and json.loads(destination.read_text()) != plan:
+    if destination.exists() and {k: v for k, v in json.loads(destination.read_text()).items() if k != "pos_version"} != plan:
         raise ValueError("source plan changed; preserve/review existing transcripts before preparing another run")
+    if destination.exists():
+        return json.loads(destination.read_text())
     write_json(destination, plan)
     return plan
 
@@ -236,7 +242,49 @@ def read_corpus(work: Path = WORK) -> tuple[dict, dict, list[str]]:
                 blockers.append(f"{book_id}/{page}: {error}")
                 continue
             records[book_id].append(row)
+    has_pos = plan.get("pos_version") is not None or any(
+        "pos_review" in row or any("pos" in entry for entry in row["entries"])
+        for rows in records.values() for row in rows)
+    if has_pos:
+        if type(plan.get("pos_version", POS_VERSION)) is not int or plan.get("pos_version", POS_VERSION) != POS_VERSION:
+            blockers.append("unsupported POS review version")
+        plan["pos_version"] = POS_VERSION
+        for book_id, rows in records.items():
+            for row in rows:
+                if row["kind"] != "vocab":
+                    continue
+                try:
+                    if any("pos" not in entry for entry in row["entries"]):
+                        raise ValueError("POS review missing entries")
+                    review_regions(row, plan["books"][book_id], book_id, work.parent / "vocab-page-regions", sha256)
+                    for entry in row["entries"]:
+                        resolve_source(row, entry, rows)
+                except (ValueError, KeyError, TypeError, OSError) as error:
+                    blockers.append(f"{book_id}/{row['source_pdf_page']}: {error}")
     return plan, records, blockers
+
+
+def pos_status(records: dict) -> dict:
+    result = {}
+    for book_id, rows in records.items():
+        counts, groups, print_pages, total = Counter(), defaultdict(set), defaultdict(set), 0
+        for row in rows:
+            for entry in row["entries"]:
+                total += 1
+                if "pos" not in entry:
+                    continue
+                counts[entry["pos"]["status"]] += 1
+                # Printing order/layout variants remain separate hits, but are
+                # not grammatical conflicts when their status and tag sets agree.
+                pos = entry["pos"]
+                key = (entry["word"], entry["unit"], entry.get("page"))
+                groups[key].add((pos["status"], tuple(sorted(pos["tags"]))))
+                print_pages[key].add(row["source_pdf_page"])
+        result[book_id] = {"total": total, "reviewed": sum(counts.values()),
+                           "pending": total - sum(counts.values()), "statuses": dict(counts),
+                           "conflicts": sum(len(values) > 1 and len(print_pages[key]) > 1
+                                            for key, values in groups.items())}
+    return result
 
 
 def build_bundle(work: Path = WORK, output: Path = OUTPUT) -> dict:
@@ -248,6 +296,9 @@ def build_bundle(work: Path = WORK, output: Path = OUTPUT) -> dict:
     try:
         payloads = {series: {"v": VERSION, "books": {}, "pdfs": {}, "w": {}}
                     for series in ("pep", "nce")}
+        if plan.get("pos_version"):
+            for index in payloads.values():
+                index["pos_version"] = POS_VERSION
         page_map = {"v": 1, "coordinate_system": "visible-page-top-left-normalized", "books": {}}
         for book_id, book in plan["books"].items():
             source = PdfReader(book["source"])
@@ -267,23 +318,44 @@ def build_bundle(work: Path = WORK, output: Path = OUTPUT) -> dict:
                              "units": sorted({e["unit"] for e in record["entries"]}),
                              "width": float(original.cropbox.width), "height": float(original.cropbox.height),
                              "rotation": original.rotation})
+                if "pos_review" in record:
+                    maps[-1]["pos_review"] = record["pos_review"]
                 writer.add_outline_item(f"原书第 {record['printed_page'] or record['source_pdf_page']} 页", snapshot_page - 1)
                 for entry in record["entries"]:
-                    identity = (book_id, entry["unit"], entry["page"], entry["zh"], entry["word"])
+                    identity = (book_id, entry["unit"], entry["page"], entry["zh"], entry["word"], pos_identity(entry.get("pos")))
                     for key in {lemma(w) for w in [entry["word"], *entry.get("aliases", [])]}:
                         hits = index["w"].setdefault(key, [])
-                        hit = next((h for h in hits if (h["book"], h["unit"], h.get("page"), h["zh"], h["headword"]) == identity), None)
+                        hit = next((h for h in hits if (h["book"], h["unit"], h.get("page"), h["zh"], h["headword"], pos_identity(h.get("pos"))) == identity), None)
                         if hit is None:
                             hit = {"book": book_id, "unit": entry["unit"], "zh": entry["zh"],
                                    "headword": entry["word"], "pdf_pages": [], "references": []}
                             if entry["page"] is not None:
                                 hit["page"] = entry["page"]
+                            if "pos" in entry:
+                                hit.update(pos=semantics(entry["pos"]), pos_evidence=[])
                             hits.append(hit)
                         if snapshot_page not in hit["pdf_pages"]:
                             hit["pdf_pages"].append(snapshot_page)
                         reference = {"pdf_page": snapshot_page, "region_id": entry["region_id"]}
                         if reference not in hit["references"]:
                             hit["references"].append(reference)
+                        if "pos" in entry:
+                            origin, source_entry = resolve_source(record, entry, records[book_id])
+                            origin_page = 1 + next(i for i, r in enumerate(r for r in records[book_id] if r["kind"] == "vocab")
+                                                   if r["source_pdf_page"] == origin["source_pdf_page"])
+                            evidence = {"pdf_page": origin_page, "source_pdf_page": origin["source_pdf_page"],
+                                        "source_sha256": book["source_sha256"], "region_id": source_entry["region_id"],
+                                        **origin["pos_review"]["regions"][source_entry["region_id"]]}
+                            if entry["pos"].get("note"):
+                                evidence["note"] = entry["pos"]["note"]
+                            if evidence not in hit["pos_evidence"]:
+                                hit["pos_evidence"].append(evidence)
+                            # Aliases on a continuation must also reach its printed POS source.
+                            if origin_page not in hit["pdf_pages"]:
+                                hit["pdf_pages"].append(origin_page)
+                            origin_ref = {"pdf_page": origin_page, "region_id": source_entry["region_id"]}
+                            if origin_ref not in hit["references"]:
+                                hit["references"].append(origin_ref)
             if not writer.pages:
                 raise ValueError(f"no reviewed vocabulary pages: {book_id}")
             relative = f"pdf/{book_id}-vocab.pdf"
@@ -356,6 +428,8 @@ def validate_bundle(path: Path) -> None:
         index = json.loads((path / f"{series}-vocab-index.min.json").read_text())
         if index.get("v") != VERSION:
             raise ValueError("index version mismatch")
+        if "pos_version" in index and (type(index["pos_version"]) is not int or index["pos_version"] != POS_VERSION):
+            raise ValueError("unsupported POS version")
         if set(index["books"]) != set(index["pdfs"]) or used_books.intersection(index["books"]):
             raise ValueError("book catalogue and PDFs disagree")
         used_books.update(index["books"])
@@ -377,6 +451,13 @@ def validate_bundle(path: Path) -> None:
                     raise ValueError(f"invalid original page ordering: {book_id}")
                 previous = source_page
                 validate_regions(p["regions"])
+                if "pos_review" in p:
+                    review = p["pos_review"]
+                    if (not isinstance(review, dict) or review.get("reviewed_by") != "codex-direct-vision" or not isinstance(review.get("regions"), dict)
+                            or any(rid not in {r["id"] for r in p["regions"]} or
+                                   not isinstance(proof, dict) or not all(valid_digest(proof.get(k)) for k in ("metadata_sha256", "image_sha256"))
+                                   for rid, proof in review["regions"].items())):
+                        raise ValueError("invalid mapped POS review")
         for word, hits in index["w"].items():
             if lemma(word) != word or not hits:
                 raise ValueError(f"invalid lookup key: {word}")
@@ -394,6 +475,32 @@ def validate_bundle(path: Path) -> None:
                     mapped_page = mapped_books[hit["book"]]["pages"][ref["pdf_page"] - 1]
                     if ref["region_id"] not in {r["id"] for r in mapped_page["regions"]} or hit["unit"] not in mapped_page["units"]:
                         raise ValueError(f"bad region or unit reference: {word}")
+                if index.get("pos_version") and "pos" not in hit:
+                    raise ValueError("complete POS index is missing an occurrence status")
+                if not index.get("pos_version") and ("pos" in hit or "pos_evidence" in hit):
+                    raise ValueError("POS occurrence requires an extension version")
+                if "pos" in hit:
+                    validate_pos(hit["pos"])
+                    evidence = hit.get("pos_evidence")
+                    if not isinstance(evidence, list) or not evidence:
+                        raise ValueError("missing POS evidence")
+                    for proof in evidence:
+                        if not isinstance(proof, dict):
+                            raise ValueError("invalid POS evidence")
+                        n = proof.get("pdf_page")
+                        if type(n) is not int or n not in destinations:
+                            raise ValueError("invalid POS evidence page")
+                        mapped = mapped_books[hit["book"]]
+                        page = mapped["pages"][n - 1]
+                        rid = proof.get("region_id")
+                        region_proof = page.get("pos_review", {}).get("regions", {}).get(rid)
+                        if (not region_proof or type(proof.get("source_pdf_page")) is not int
+                                or proof.get("source_pdf_page") != page["source_pdf_page"]
+                                or proof.get("source_sha256") != mapped["source_sha256"]
+                                or ("note" in proof and (not isinstance(proof["note"], str) or not proof["note"].strip()))
+                                or {"pdf_page": n, "region_id": rid} not in references
+                                or any(proof.get(k) != region_proof[k] for k in ("metadata_sha256", "image_sha256"))):
+                            raise ValueError("POS evidence and mapped source disagree")
     if used_books != set(mapped_books) or required_files != set(files):
         raise ValueError("bundle contains missing or unreferenced books/files")
 
@@ -491,7 +598,7 @@ def main() -> None:
     elif args.command == "status":
         plan, records, blockers = read_corpus(args.work)
         result = {"books": len(plan["books"]), "reviewed_pages": sum(len(r) for r in records.values()),
-                  "remaining_pages": len(blockers), "next": blockers[:5]}
+                  "remaining_pages": len(blockers), "next": blockers[:5], "pos": pos_status(records)}
     elif args.command == "build":
         result = build_bundle(args.work, args.output)
     elif args.command == "regions":
