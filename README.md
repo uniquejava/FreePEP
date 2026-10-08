@@ -143,6 +143,8 @@ python3 -m vocab_ocr.nce.build_book_index --source-dir '/path/to/8.新概念英�
 
 供后续词性等二次处理的**词表页 PDF 快照**保存在原书目录旁的 `词表页快照/`：四册分别 115、96、67、52 页，附快照页序到 Lesson／原书页码的 CSV。可用 `python3 -m vocab_ocr.nce.export_vocab_pages` 从原书无损重建；页码映射与筛页注意事项见 [快照笔记](./.scratch/nce-vocab-index/vocab-page-snapshots.md)（#08）。快照和原书均不入 Git。
 
+**后续需求（#09，尚未实施）**：[教材词表页 PDF 与词源索引一键跳转](./.scratch/vocab-page-links/issues/01-vocab-page-pdf-links.md)覆盖人教 12 册与新概念 4 册，每册一份完整词表页快照，共 16 份。EggplantDict 点击教材出处时打开实际印有该词的完整原页，保留教材版面与上下文。二次识别另用词表区域裁图；计划将已核对的页码关系、区域坐标与阅读顺序保存在 `data/vocab/vocab-page-map.json`，派生裁图与识别候选保存在 `data/vocab/_work/vocab-page-regions/<book_id>/`。本票准备素材和映射，新增音标、词性、释义转录由后续任务处理。
+
 ---
 
 ## 远程
