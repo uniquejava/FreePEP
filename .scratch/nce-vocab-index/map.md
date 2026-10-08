@@ -1,4 +1,4 @@
-# nce-vocab-index（项目票 #02、#06、#07）— **resolved**（经典版 1–4 册）
+# nce-vocab-index（项目票 #02、#06、#07、#08）— **resolved**（经典版 1–4 册）
 
 四册 Excel 提供词头；第 1–4 册再用课文 PDF 核对 Lesson。与人教共用 `v:1` 三段 hit 形状；教材释义槽留空。
 
@@ -12,6 +12,7 @@
 - 2026-10-08：四册册级索引已生成并抽核，3357 个词头；每个 hit 保持 `[book_id, "", ""]`。见 [#02](./issues/01-nce-1-4-vocab-index.md)。
 - 2026-10-08：[#06](./issues/02-lesson-index-from-pdfs.md) 定向读取课文 PDF 的词表页，核准第 2、3 册全部现有词头的课次；第 1 册 700/867 个词头获得课次，其余保留册级。
 - 2026-10-08：[#07](./issues/03-nce4-lesson-index.md) 对照 314 页完整扫描版第四册的目录和词表，核准 784/784 个现有词头的课次；该册 9 个重复词保留两课 hit。
+- 2026-10-08：[#08](./issues/04-preserve-vocab-pages.md) 从原书无损保存四册词表页共 330 页，附 Lesson／原书页码清单；[重建笔记](./vocab-page-snapshots.md) 和已核对页码映射入库，PDF 留在原书目录旁。
 
 ## Fog
 
@@ -25,6 +26,8 @@
 | [`issues/01-nce-1-4-vocab-index.md`](./issues/01-nce-1-4-vocab-index.md) | #02 册级索引 |
 | [`issues/02-lesson-index-from-pdfs.md`](./issues/02-lesson-index-from-pdfs.md) | #06 课次核对 |
 | [`issues/03-nce4-lesson-index.md`](./issues/03-nce4-lesson-index.md) | #07 第四册完整扫描版课次核对 |
+| [`issues/04-preserve-vocab-pages.md`](./issues/04-preserve-vocab-pages.md) | #08 词表页快照与重建 |
+| [`vocab-page-snapshots.md`](./vocab-page-snapshots.md) | 二次处理与快照重建笔记 |
 | [`../english-vocab-ocr/`](../english-vocab-ocr/) | 项目票 #01（人教 PEP 格式先例） |
 | [`../../data/vocab/nce-vocab-index.min.json`](../../data/vocab/nce-vocab-index.min.json) | 正式新概念索引 |
 | [`../../data/vocab/vocab-index.min.json`](../../data/vocab/vocab-index.min.json) | 现行 PEP 索引样例 |

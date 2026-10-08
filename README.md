@@ -141,6 +141,8 @@ python3 -m vocab_ocr.nce.build_book_index --source-dir '/path/to/8.新概念英�
 
 **核对进度（2026-10-08）**：第 2、3、4 册现有 Excel 词头分别 840/840、1050/1050、784/784 已有课次，少量 OCR 漏读词已对照 PDF 目视补录；同一词在多课词表出现时保留多条 hit。第 1 册 867 个词头中有 700 个直接匹配或目视核对词表，余下 167 个保留空课次，见本机 `nce-1/review.csv`。第 2 册 Excel `content` 对应课文词表 `contents`、`the press` 对应 `Press`，两项已目视核到课次，词头仍保持 Excel 原样。原二册 `python3 -m vocab_ocr.nce.pilot_nce2_from_excel` 只写入 `_work/nce-2/` 历史预览，不覆盖正式索引。票在 [`.scratch/english-vocab-ocr/`](./.scratch/english-vocab-ocr/)（`#01`）、[`.scratch/nce-vocab-index/`](./.scratch/nce-vocab-index/)（`#02`、`#06`、`#07`）。
 
+供后续词性等二次处理的**词表页 PDF 快照**保存在原书目录旁的 `词表页快照/`：四册分别 115、96、67、52 页，附快照页序到 Lesson／原书页码的 CSV。可用 `python3 -m vocab_ocr.nce.export_vocab_pages` 从原书无损重建；页码映射与筛页注意事项见 [快照笔记](./.scratch/nce-vocab-index/vocab-page-snapshots.md)（#08）。快照和原书均不入 Git。
+
 ---
 
 ## 远程
