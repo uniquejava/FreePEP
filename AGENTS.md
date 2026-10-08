@@ -24,3 +24,9 @@
 ### Domain docs
 
 单一上下文领域文档布局，见 [`docs/agents/domain.md`](docs/agents/domain.md)。
+
+## 本地票号与提交消息
+
+- 本仓库是用户独立开发的 fork，Ticket 仅指 `.scratch/` 中的本地 Markdown 票据；票据关联使用本地文件路径。
+- commit message 使用 `FP-010 简短中文主题`，多票使用 `FP-005、FP-009 简短中文主题`。`FP-010` 对应本地项目票号 `#10`；会话标题仍按全局规则使用 `#10`。
+- commit message 不使用裸 `#NN`、`owner/repo#NN`、外部 issue/PR URL 或关闭外部票据的关键字，避免 GitHub 将本地票号解析为上游或其他仓库的关联。

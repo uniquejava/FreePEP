@@ -2,6 +2,8 @@
 
 Issues and specs for this repo live as markdown files in `.scratch/`.
 
+This fork is developed independently by its owner. Tickets refer to local Markdown files; use local file links for ticket references. For ticket IDs in commit messages, follow [the project rules](../../AGENTS.md#本地票号与提交消息).
+
 ## Conventions
 
 - One feature per directory: `.scratch/<feature-slug>/`
