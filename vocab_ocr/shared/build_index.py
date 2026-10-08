@@ -41,8 +41,8 @@ _KEEP_SHORT = {
 }
 _TRAILING_POS = {"a", "n", "v", "vt", "vi", "adj", "adv", "prep", "conj", "pron"}
 
-# Shared schema for PEP + NCE. Hits always end with zh (string). Keep at 1 until a
-# breaking change ships; do not invent parallel version numbers per corpus.
+# Legacy OCR / Excel schema for PEP + NCE. Directly reviewed references use the
+# shared v2 object schema in vocab_ocr.reference, with exact PDF destinations.
 INDEX_VERSION = 1
 
 

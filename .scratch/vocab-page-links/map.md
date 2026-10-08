@@ -4,7 +4,7 @@
 
 ## Ticket
 
-- [#09 教材词表页 PDF 与词源索引一键跳转](./issues/01-vocab-page-pdf-links.md) — `ready-for-agent`；已补充完整原页阅读与二次处理资料保存约定，尚未实施。
+- [#09 教材词表页 PDF 与词源索引一键跳转](./issues/01-vocab-page-pdf-links.md) — `claimed`；16 册直接视觉重建完成，542 张完整页、917 个二次处理区域，v2 资料包已随消费端 [#25](../../../eggplant-projects/EggplantDict/.scratch/mvp/issues/25-textbook-reference-bundle.md) Release 构建打包；待原页阅读桌面验收。
 
 ## 关联依据
 

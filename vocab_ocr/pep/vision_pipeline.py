@@ -256,6 +256,8 @@ def publish_vision_index(*, work_dir: Path = VISION_WORK, review_sheet: Path = R
     if payload.get("v") != 1 or set(payload.get("books", {})) != {b.id for b in BOOKS}:
         raise ValueError("staged index is incomplete or has unexpected schema")
     destination = DEFAULT_OUT / "vocab-index.min.json"
+    if destination.exists() and json.loads(destination.read_text()).get("v", 1) > 1:
+        raise ValueError("legacy model candidates cannot replace the newer directly reviewed reference index")
     destination.parent.mkdir(parents=True, exist_ok=True)
     temp_destination = destination.with_suffix(".min.json.tmp")
     temp_destination.write_bytes(compact.read_bytes())

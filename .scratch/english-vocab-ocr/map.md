@@ -22,3 +22,8 @@
 |-----|------|
 | [`README.md`](../../README.md) §英语单词来源索引 | 复跑命令 |
 | [`issues/`](./issues/) | Tickets |
+
+## 当前重建
+
+- [#05](./issues/05-pep-visual-index-rebuild.md) 已完成：Codex 直接看原书图片重做 12 册，212 张词表页，不调用本地模型。
+- [#09](../vocab-page-links/issues/01-vocab-page-pdf-links.md) 统一为与新概念相同的 v2 索引，附逐词原页与区域引用；完整 16 册资料包随 EggplantDict [#25](../../../eggplant-projects/EggplantDict/.scratch/mvp/issues/25-textbook-reference-bundle.md) 打包。上面的 v1/OCR 描述是历史实施记录。

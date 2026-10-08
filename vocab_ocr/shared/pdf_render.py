@@ -34,6 +34,7 @@ def render_pages(
     dpi: int = 200,
     *,
     clear_prefix: bool = True,
+    crop_box: bool = False,
 ) -> list[Path]:
     """Render 1-based inclusive page range. Returns sorted JPEG paths."""
     require_pdftoppm()
@@ -55,6 +56,8 @@ def render_pages(
         str(pdf),
         str(stem),
     ]
+    if crop_box:
+        cmd.insert(1, "-cropbox")
     subprocess.check_call(cmd)
     pages = sorted(out_dir.glob(f"{prefix}-*.jpg"))
     if not pages:

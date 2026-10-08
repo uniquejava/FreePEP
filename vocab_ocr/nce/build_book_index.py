@@ -14,11 +14,11 @@ from pathlib import Path
 
 from vocab_ocr.nce.pilot_nce2_from_excel import norm_lemma, read_excel
 from vocab_ocr.shared.build_index import INDEX_VERSION
-from vocab_ocr.shared.paths import DEFAULT_OUT
+from vocab_ocr.shared.paths import DEFAULT_WORK
 
 
 SOURCE_DIR = Path.home() / "code/English/8.新概念英语"
-OUTPUT = DEFAULT_OUT / "nce-vocab-index.min.json"
+OUTPUT = DEFAULT_WORK / "nce-legacy-preview" / "nce-vocab-index.min.json"
 BOOK_FILES = (
     ("nce-1", "新概念英语第一册", "新概念英语第一册（新版）.xlsx"),
     ("nce-2", "新概念英语第二册", "新概念英语第二册（新版）.xlsx"),
@@ -97,6 +97,8 @@ def add_pdf_lessons(index: dict, work: Path) -> dict[str, int]:
 
 
 def write_index(index: dict, output: Path) -> Path:
+    if output.exists() and json.loads(output.read_text()).get("v", 1) > INDEX_VERSION:
+        raise ValueError("legacy Excel output cannot replace a newer reference index; use a preview path")
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_name(output.name + ".tmp")
     temporary.write_text(

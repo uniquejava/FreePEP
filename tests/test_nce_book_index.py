@@ -6,10 +6,18 @@ import unittest
 from pathlib import Path
 
 from vocab_ocr.nce.align_pdf_lessons import matches, pdf_page, vocab_block_four
-from vocab_ocr.nce.build_book_index import BOOK_FILES, add_pdf_lessons, build_index
+from vocab_ocr.nce.build_book_index import BOOK_FILES, add_pdf_lessons, build_index, write_index
 
 
 class NceBookIndexTests(unittest.TestCase):
+    def test_legacy_excel_cannot_replace_new_reference_index(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "index.json"
+            path.write_text('{"v":2,"keep":"reviewed"}')
+            with self.assertRaisesRegex(ValueError, "cannot replace"):
+                write_index({"v": 1}, path)
+            self.assertEqual(json.loads(path.read_text())["keep"], "reviewed")
+
     def test_deduplicates_within_book_and_keeps_cross_book_membership(self) -> None:
         rows = {book_id: [{"word": f"only {book_id}"}] for book_id, _, _ in BOOK_FILES}
         rows["nce-1"] += [{"word": "Private"}, {"word": "private"}]
