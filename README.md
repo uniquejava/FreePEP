@@ -91,16 +91,16 @@ python cli.py --xd "高中" --xk "英语" -o ./downloads/高中/英语 --flat -y
 
 ## 英语单词来源索引（OCR）
 
-现行流程由 **Codex 与获授权的子代理直接查看原书图片、逐页转录**，脚本仅渲染、存储、校验和打包，不调用本地模型。覆盖人教版 12 册与经典版新概念 4 册，共 16 本。完整实施约定见 [#09](./.scratch/vocab-page-links/issues/01-vocab-page-pdf-links.md)，人教质量重建承接 [#05](./.scratch/english-vocab-ocr/issues/05-pep-visual-index-rebuild.md)，词典消费端为 [EggplantDict #25](../eggplant-projects/EggplantDict/.scratch/mvp/issues/25-textbook-reference-bundle.md)。
+现行流程由 **Codex 与获授权的子代理直接查看原书图片、逐页转录**，脚本仅渲染、存储、校验和打包，不调用本地模型。覆盖人教版 13 册与经典版新概念 4 册，共 17 本；九年级采用新版上下册，替换旧全一册，见 [#12](./.scratch/junior9-new-edition/issues/01-replace-grade9-index.md)。完整实施约定见 [#09](./.scratch/vocab-page-links/issues/01-vocab-page-pdf-links.md)，人教质量重建承接 [#05](./.scratch/english-vocab-ocr/issues/05-pep-visual-index-rebuild.md)，词典消费端为 [EggplantDict #25](../eggplant-projects/EggplantDict/.scratch/mvp/issues/25-textbook-reference-bundle.md)。
 
 ### 正式数据与原页资料包
 
 两套索引共用 **`v:2`** 对象结构：
 
-- [`data/vocab/vocab-index.min.json`](./data/vocab/vocab-index.min.json)：人教版词头、课次、完整教材中文释义和原页。
+- [`data/vocab/vocab-index.min.json`](./data/vocab/vocab-index.min.json)：人教版词头、课次、完整教材中文释义和原页；九下难辨中文的辅助来源按 `gloss_version:1` 明确标记。
 - [`data/vocab/nce-vocab-index.min.json`](./data/vocab/nce-vocab-index.min.json)：新概念四册，以原书词表重新转录，替代旧 Excel 词头与空释义；保留同词多课。
 - [`data/vocab/vocab-page-map.json`](./data/vocab/vocab-page-map.json)：源书校验值、三种页码、真实初中目录单元边界、区域框和阅读顺序。
-- `downloads/vocab-reference/`：可移动的完整资料包，两份索引、映射、校验清单与 `pdf/<book_id>-vocab.pdf`。**每册一份 PDF，汇集该册全部完整词表页，16 册共 16 份。** 原书与快照不入 Git。
+- `downloads/vocab-reference/`：可移动的完整资料包，两份索引、映射、校验清单与 `pdf/<book_id>-vocab.pdf`。**每册一份 PDF，汇集该册全部完整词表页，17 册共 17 份、545 页。** 九上20页；九下11页采用带说明的中文清晰阅读衍生页，原书身份仍绑定108页候选。原书与快照不入 Git。
 
 ```json
 {
@@ -124,30 +124,88 @@ python cli.py --xd "高中" --xk "英语" -o ./downloads/高中/英语 --flat -y
 用 `python3 -m venv .venv` 建立环境，再运行 `.venv/bin/python -m pip install -r requirements.txt`；渲染/裁图需要 `brew install poppler`。
 
 ```bash
-.venv/bin/python -m vocab_ocr.reference prepare   # 冻结本机原书身份与候选页；不识别
-.venv/bin/python -m vocab_ocr.reference status
-.venv/bin/python -m vocab_ocr.reference build     # 只组合已复核逐页记录
-.venv/bin/python -m vocab_ocr.reference validate
-.venv/bin/python -m vocab_ocr.reference publish   # 只导出三个小型正式 JSON
+.venv/bin/python -m vocab_ocr.reference prepare-grade9 \
+  --work data/vocab/_work/junior9-index \
+  --base-work data/vocab/_work/reference-rebuild \
+  --base-bundle downloads/vocab-reference-before-grade9 \
+  --reading-pdf 'downloads/初中（六三学制）/九年级/英语九年级下册-词表中文清晰版.pdf'
+.venv/bin/python -m vocab_ocr.reference status --work data/vocab/_work/junior9-index
+.venv/bin/python -m vocab_ocr.reference build \
+  --work data/vocab/_work/junior9-index \
+  --base-bundle downloads/vocab-reference-before-grade9 \
+  --output downloads/vocab-reference
+.venv/bin/python -m vocab_ocr.reference validate --output downloads/vocab-reference
+.venv/bin/python -m vocab_ocr.reference publish --output downloads/vocab-reference
 .venv/bin/python -m vocab_ocr.reference install \
   --destination ../eggplant-projects/EggplantDict/EggplantDict/Resources/TextbookReferences
 ```
 
-逐页证据在被 Git 忽略的 `data/vocab/_work/reference-rebuild/sources.json` 与 `books/<book_id>/pages/`，绑定源书 SHA-256，并标记 `codex-direct-vision`。`build` 要求全部候选页已转录/分类，原书与页数未变，词条/课次/区域/页码有效；失败不覆盖已发布的资料包。`install` 校验后整体替换消费端资源目录。应用构建把完整目录复制到 `.app/Contents/Resources/TextbookReferences/`，运行时不依赖 FreePEP、原书路径或工作缓存；资料不完整或版本不符时拒绝打开。
+逐页证据保留在被 Git 忽略的本机工作区：旧15册记录仍在 `data/vocab/_work/reference-rebuild/`，新九年级在 `data/vocab/_work/junior9-index/` 的 `sources.json` 与 `books/<book_id>/pages/`。记录绑定源书 SHA-256，并标记 `codex-direct-vision`。旧完整基准包保存在 `downloads/vocab-reference-before-grade9/`，仅用于冻结数据复用；现行默认包是 `downloads/vocab-reference/`。新版增量构建只消费九上／九下新记录，其他15册命中、映射和PDF原样复用，新概念JSON原字节复制。`build` 要求全部候选页已转录/分类，原书与页数未变，词条/课次/区域/页码有效；失败不覆盖已发布的资料包。`install` 校验后整体替换消费端资源目录。应用构建把完整目录复制到 `.app/Contents/Resources/TextbookReferences/`，运行时不依赖 FreePEP、原书路径或工作缓存；资料不完整或版本不符时拒绝打开。
 
 人教源书由 [`vocab_ocr/pep/catalog.py`](./vocab_ocr/pep/catalog.py) 定位。新概念默认源书在 `~/Pdf/新概念课文1-4PDF/`，必须使用完整四册；第四册是 `新概念4-完整.pdf`，同目录 49 页的 `新概念4.pdf` 不是该完整扫描版。新概念原书目录/续页计划见 [`vocab_ocr/nce/vocab_page_map.json`](./vocab_ocr/nce/vocab_page_map.json)。
+
+本机只保留这一份现行完整包；原书、九下清晰阅读版和 `before-grade9` 冻结基准分别承担来源、修复输入及增量复跑用途。重复生成包、已完成审阅的九年级草稿包与修复预览PDF已清理。逐页转录、修复标注及冻结区域证据保留；需要再次审阅时按下方命令重建草稿。
 
 ### 二次处理
 
 ```bash
-.venv/bin/python -m vocab_ocr.reference regions --dpi 200
+.venv/bin/python -m vocab_ocr.reference regions --book junior-9a --book junior-9b --dpi 200
 ```
 
 从完整资料包导出 `data/vocab/_work/vocab-page-regions/<book_id>/<快照页>-<region_id>.png`，每张配同名 JSON，记录原页/快照页、区域框、源书与 PDF 校验值、映射校验值、渲染 DPI。坐标为**可见页方向、左上角原点的归一化坐标**，渲染遵循 CropBox 与 PDF 旋转。大部分双栏分开裁；同页跨栏释义用两栏并集区域，跨页词关联全部需要的完整页。后续识别信息应引用这些来源 JSON；裁图可重建，不随应用打包。用户阅读时通过词典标签右键菜单打开**完整原页**，保留书页的感觉；悬停 Tooltip 继续显示书名和课次。
 
+### 九年级增量复核与辅助中文（#12）
+
+新ID为 `junior-9a`、`junior-9b`，现行包及APP不含 `junior-9`。单元边界按该版目录核实：九上8 Unit、九下5 Unit。上册117–136共20页词表；下册94–104共11页。所有候选尾页均直接查看并分类，未把不规则动词、后记或封底当词表。
+
+[EggplantDict #56](../eggplant-projects/EggplantDict/.scratch/mvp/issues/56-grade9-new-edition-resources.md)已完成正式接入：52项Release定向测试与上下册出处、来源说明、待核词性、异常页码和完整阅读页的核心界面验收通过，正常词库已恢复到唯一Release实例。7,057个教材联想键及新版候选由测试确认；当前微信拼音输入法下自动输入未确认候选浮层，实际输入交互留待用户体验。生成端96项测试与9个子测试通过，其余15册资料保持不变。
+
+新册先生成可审阅草稿，再按册导出区域，完成直接视觉复核并将区域JSON／PNG摘要写入每页 `pos_review` 后才正式构建：
+
+```bash
+.venv/bin/python -m vocab_ocr.reference draft \
+  --work data/vocab/_work/junior9-index --output data/vocab/_work/junior9-index/draft \
+  --book junior-9a --book junior-9b
+.venv/bin/python -m vocab_ocr.reference regions \
+  --work data/vocab/_work/junior9-index --output data/vocab/_work/junior9-index/draft \
+  --book junior-9a --book junior-9b --dpi 200
+```
+
+草稿带 `kind:draft`，正式校验、发布与安装均拒绝它。重新裁图后须重核并更新对应的证据摘要；不能保留旧证据假称已复核。旧册不重裁。正式构建与已审阅草稿共用同一抽页逻辑，两册PDF字节保持一致。旧全一册源计划不能再正式build；含退役ID的包不能publish/install，旧基准只允许校验与增量复用，防止默认命令覆回旧数据。
+
+人教索引增加 `gloss_version:1`，有辅助中文的命中保存 `gloss_source`。未带字段的记录沿用原印释义；带字段时，释义与 `pos.senses[].zh` 一并保留来源。定义合并身份包含来源，词典显示说明。校验实现见 [gloss.py](./vocab_ocr/gloss.py)。
+
+```json
+{"gloss_source":{"status":"supplemented","note":"原页中文难辨，采用同版辅助资料补齐。",
+  "sources":[{"kind":"same-edition","label":"同版教学资料","url":"https://zy.21cnjy.com/26012639"}]}}
+```
+
+`status`为`cross-reference`（同书另一词表恢复）或`supplemented`（同版／常规专名补齐）。每个来源带`label`；`same-book`记录`source_pdf_pages`，`same-edition`记录HTTP(S) URL，`conventional-name`说明未获独立同版印刷中文确证。索引中26个不同出处有来源标记，包含跨页中文拼接；不能把这些释义称作无标记的逐字原印。
+
+6处正文页码与单元范围／另一词表冲突，保留实际印刷`page`，以`unit_source_pdf_page`与`reference_note`绑定同书另一词项确认Unit：shrimp、bother、postman、trap首义、empty、translate。只有相同词头与Unit的直接引用词项才能确认例外，不接受单纯说明绕过目录校验。
+
+九下的工作计划显式绑定 `reading_derivative`（本机路径、摘要、原书摘要、94–104页序与说明）。公开映射去除本机路径；索引`pdfs[junior-9b].pdf_note`保留阅读衍生用途元数据，APP不再常驻显示这段技术说明。逐释义的辅助中文来源仍显示。英文、音标、词性及页码保留原图，不表示原图疑点已校正；原书身份和英文词性证据仍绑定源书。
+
+### 九下词表中文阅读修复（#13）
+
+用户下载的九下候选词表有中文重影。[#13](./.scratch/junior9-new-edition/issues/02-verify-and-clarify-lower-vocab.md) 另做 11 页阅读衍生 PDF，仅覆盖中文区域，保留英文、音标、词性、词序、正文引用页和印刷页码。难辨处参考同版资料，替补与原页恢复分别记在本机标注的 `origin` / `evidence` 中；该文件不能替代出版社原页或直接发布为正式索引证据。
+
+用户反馈后的续修移除源94／100页（印刷88／94页）顶部仍重影的中文注释，记录为两处 `layout-cleanup`，原有514处词条中文覆盖保持不变。整页像素对比仅这两条注释区域变化；重新打包时阅读衍生绑定及九下区域证据摘要同步更新，不改变词项与其他16册资料。
+
+```bash
+.venv/bin/python -m vocab_ocr.clarify_grade9_pdf \
+  'downloads/初中（六三学制）/九年级/2027春人教版九年级英语下册电子课本（彩色版）.pdf' \
+  data/vocab/_work/junior9-clarity/overlays-094-095.json \
+  data/vocab/_work/junior9-clarity/overlays-096-099.json \
+  data/vocab/_work/junior9-clarity/overlays-100-104.json \
+  --output 'downloads/初中（六三学制）/九年级/英语九年级下册-词表中文清晰版.pdf'
+```
+
+标注绑定 `source_sha256`；框、基线和字号采用对应渲染图左上角像素坐标。默认使用 macOS 的宋体 SC（`Songti.ttc`、子字体 6）；其他环境通过 `--font` / `--font-index` 指定已核验字体。生成器转换非零 CropBox 原点，检查页范围、重复页、来源、文字宽度和原书摘要，拒绝覆盖原书，并将逐项依据作为 `chinese-repair-provenance.json` 附件嵌入 PDF。复跑后仍须逐页渲染检查遮罩和文字；原书、标注、渲染图及衍生 PDF 都保留本机，不入 Git。
+
 ### 教材印刷词性（#10）
 
-[FreePEP #10](./.scratch/vocab-pos/issues/01-printed-pos-from-regions.md) 与 [EggplantDict #26](../eggplant-projects/EggplantDict/.scratch/mvp/issues/26-textbook-printed-pos.md) 承接现成区域图的直接视觉识读。16 册的 14,438 条记录已全部识读、校验并发布：11,983 条带印刷词性、2,409 条未标注、46 条类型说明，待核/推断均为 0；按册明细见 #10。脚本不做 OCR 或调用识别模型。
+[FreePEP #10](./.scratch/vocab-pos/issues/01-printed-pos-from-regions.md) 与 [EggplantDict #26](../eggplant-projects/EggplantDict/.scratch/mvp/issues/26-textbook-printed-pos.md) 承接现成区域图的直接视觉识读。#10初次发布的16册共14,438条：11,983条带印刷词性、2,409条未标注、46条类型说明，待核/推断均为0；历史明细见#10。#12替换后，九上922条为750印刷／172未标；九下456条为353印刷／91未标／12待核，均完成原页和区域复核。待核条目保留原字及说明，不用通用语法覆盖。脚本不做 OCR 或调用识别模型。
 
 扩展保持 `v:2`，完整识读索引增加 `pos_version:1`。每条出处的可选 `pos` 包含 `status`、教材原文 `raw` 和规范 `tags` 列表；旧 v2 无这些字段仍可读取。多项原文标签按印刷顺序以分号或换行连接，组合标注保留 `&`。词性属于该条教材释义，不能给整个查询词头套一个通用词性。
 

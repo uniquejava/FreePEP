@@ -8,6 +8,7 @@ have a record bound to the current source PDF digest.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -24,10 +25,15 @@ from vocab_ocr.pep.catalog import BOOKS
 from vocab_ocr.pep.parse_appendix import UnitRange, map_page_to_unit
 from vocab_ocr.shared.paths import DEFAULT_WORK, DOWNLOADS
 from vocab_ocr.pos import POS_VERSION, identity as pos_identity, review_regions, resolve_source, semantics, validate_pos, valid_digest
+from vocab_ocr.gloss import GLOSS_VERSION, identity as gloss_identity, validate_gloss_source
 
 WORK = DEFAULT_WORK / "reference-rebuild"
 OUTPUT = DOWNLOADS / "vocab-reference"
 VERSION = 2
+GRADE9_BOOKS = ("junior-9a", "junior-9b")
+GRADE9_WORK = DEFAULT_WORK / "junior9-index"
+JUNIOR_APPENDIX_STARTS = {"junior-7a": 116, "junior-7b": 107, "junior-8a": 121,
+                         "junior-8b": 123, "junior-9": 172, "junior-9a": 117, "junior-9b": 94}
 
 # Exact editions checked against their rendered contents pages. The legacy OCR
 # fallback had only twelve Units for the fourteen-Unit Grade 9 textbook.
@@ -39,6 +45,8 @@ REVIEWED_JUNIOR_TOC: dict[str, tuple[int, list[tuple[str, int]], int]] = {
     "junior-8a": (150, [(str(i), 1 + 10 * (i - 1)) for i in range(1, 9)], 81),
     "junior-8b": (154, [(str(i), 1 + 10 * (i - 1)) for i in range(1, 9)], 81),
     "junior-9": (204, [(str(i), 1 + 8 * (i - 1)) for i in range(1, 15)], 113),
+    "junior-9a": (142, [(str(i), 1 + 10 * (i - 1)) for i in range(1, 9)], 81),
+    "junior-9b": (108, [(str(i), 1 + 10 * (i - 1)) for i in range(1, 6)], 51),
 }
 
 
@@ -116,6 +124,8 @@ def validate_record(record: dict, book: dict, page: int) -> None:
     for entry in entries:
         if "pos" in entry:
             validate_pos(entry["pos"])
+        if "gloss_source" in entry:
+            validate_gloss_source(entry["gloss_source"], book["source_page_count"])
         if (entry.get("lemma") != lemma(entry["word"]) or not entry.get("unit") or
                 not entry.get("zh") or entry.get("region_id") not in ids):
             raise ValueError(f"invalid source entry: {entry}")
@@ -129,10 +139,18 @@ def validate_record(record: dict, book: dict, page: int) -> None:
         body_page = entry.get("page")
         if body_page is not None and (type(body_page) is not int or body_page < 1):
             raise ValueError("invalid body page")
+        if "unit_source_pdf_page" in entry or "reference_note" in entry:
+            source_page, note = entry.get("unit_source_pdf_page"), entry.get("reference_note")
+            if (book["stage"] != "junior" or body_page is None
+                    or type(source_page) is not int or source_page == page
+                    or source_page not in {p["source_pdf_page"] for p in book["pages"]}
+                    or not isinstance(note, str) or not note.strip()):
+                raise ValueError("invalid cross-table Unit reference")
         if book["stage"] == "junior" and body_page is not None:
             # Detect stale records after a corrected contents-page mapping.
             book_id = book.get("id")
-            if book_id is None or entry["unit"] != junior_unit(book_id, book["source_page_count"], body_page):
+            if "unit_source_pdf_page" not in entry and (
+                    book_id is None or entry["unit"] != junior_unit(book_id, book["source_page_count"], body_page)):
                 raise ValueError("body page and checked Unit disagree")
 
 
@@ -140,15 +158,18 @@ def prepare(work: Path = WORK, nce_dir: Path | None = None) -> dict:
     """Freeze source identities and candidate pages; no old words are reused."""
     from vocab_ocr.nce.export_vocab_pages import load_page_map
 
+    destination = work / "sources.json"
+    if destination.exists():
+        existing = json.loads(destination.read_text())
+        if {k for k, b in existing["books"].items() if b["series"] == "pep"} != {b.id for b in BOOKS}:
+            raise ValueError("source plan changed; use the explicit replacement entry point")
     nce_dir = nce_dir or Path.home() / "Pdf/新概念课文1-4PDF"
     books = {}
     # Include the whole appendix area. Each page is classified by direct review,
     # so older OCR ranges cannot silently omit words or include acknowledgements.
-    junior_starts = {"junior-7a": 116, "junior-7b": 107, "junior-8a": 121,
-                     "junior-8b": 123, "junior-9": 172}
     for book in BOOKS:
         count = len(PdfReader(book.path).pages)
-        first = junior_starts.get(book.id, max(1, count - 35))
+        first = JUNIOR_APPENDIX_STARTS.get(book.id, max(1, count - 35))
         books[book.id] = {
             "id": book.id,
             "title": book.title, "series": "pep", "stage": book.stage,
@@ -169,13 +190,127 @@ def prepare(work: Path = WORK, nce_dir: Path | None = None) -> dict:
                       for unit, page, role in data["pages"]],
         }
     plan = {"v": 1, "reader": "codex-direct-vision", "books": books}
-    destination = work / "sources.json"
     if destination.exists() and {k: v for k, v in json.loads(destination.read_text()).items() if k != "pos_version"} != plan:
         raise ValueError("source plan changed; preserve/review existing transcripts before preparing another run")
     if destination.exists():
         return json.loads(destination.read_text())
     write_json(destination, plan)
     return plan
+
+
+def prepare_grade9_replacement(base_work: Path = WORK, work: Path = GRADE9_WORK,
+                               base_bundle: Path = OUTPUT, *, reading_pdf: Path | None = None) -> dict:
+    """Create a separate replacement plan; frozen baseline records stay in place."""
+    if work.resolve() == base_work.resolve():
+        raise ValueError("replacement work must differ from the frozen baseline work")
+    validate_bundle(base_bundle)
+    baseline = json.loads((base_work / "sources.json").read_text())
+    if "junior-9" not in baseline["books"] or any(b in baseline["books"] for b in GRADE9_BOOKS):
+        raise ValueError("baseline catalogue must contain the old Grade 9 edition")
+    books = {k: v for k, v in baseline["books"].items() if k != "junior-9"}
+    for book_id in GRADE9_BOOKS:
+        book = next(b for b in BOOKS if b.id == book_id)
+        count = len(PdfReader(book.path).pages)
+        if count != REVIEWED_JUNIOR_TOC[book_id][0]:
+            raise ValueError(f"source edition changed: {book_id}")
+        books[book_id] = {
+            "id": book_id, "title": book.title, "series": "pep", "stage": "junior",
+            "source": str(book.path), "source_sha256": sha256(book.path), "source_page_count": count,
+            "pages": [{"source_pdf_page": n, "unit": ""}
+                      for n in range(JUNIOR_APPENDIX_STARTS[book_id], count + 1)],
+        }
+    plan = {**baseline, "books": books, "replacement": {
+        "selected_books": list(GRADE9_BOOKS), "removed_books": ["junior-9"],
+        "base_work": str(base_work.resolve()),
+        "source_plan_sha256": sha256(base_work / "sources.json"),
+        "manifest_sha256": sha256(base_bundle / "manifest.json"),
+    }}
+    _check_replacement_baseline(plan, base_bundle)
+    destination = work / "sources.json"
+    current, existing_reading = None, None
+    if destination.exists():
+        current = json.loads(destination.read_text())
+        comparable = copy.deepcopy(current)
+        if "junior-9b" in comparable.get("books", {}):
+            existing_reading = comparable["books"]["junior-9b"].pop("reading_derivative", None)
+        if comparable.get("gloss_version") == GLOSS_VERSION and "gloss_version" not in plan:
+            plan["gloss_version"] = GLOSS_VERSION
+        # The direct-vision workers may already be filling the explicit two-book
+        # plan. Only an identical pair may be upgraded without touching records.
+        if comparable != plan and (set(comparable.get("books", {})) != set(GRADE9_BOOKS)
+                or any(comparable["books"][b] != books[b] for b in GRADE9_BOOKS)
+                or comparable.get("v") != 1 or comparable.get("reader") != "codex-direct-vision"
+                or set(comparable) - {"v", "reader", "books", "pos_version", "gloss_version"}
+                or comparable.get("pos_version", POS_VERSION) != POS_VERSION
+                or comparable.get("gloss_version", GLOSS_VERSION) != GLOSS_VERSION):
+            raise ValueError("replacement plan changed; preserve existing transcripts")
+    reading = existing_reading
+    if reading_pdf is not None:
+        reading = {"path": str(reading_pdf.resolve()), "sha256": sha256(reading_pdf),
+                   "source_sha256": books["junior-9b"]["source_sha256"],
+                   "source_pdf_pages": list(range(94, 105)),
+                   "note": "中文清晰阅读衍生文件；英文、音标、词性和页码保留原图，少数中文采用已标来源的阅读替补。"}
+        if existing_reading is not None and reading != existing_reading:
+            raise ValueError("reading derivative binding changed; preserve/review the existing binding")
+    if reading is not None:
+        books["junior-9b"]["reading_derivative"] = reading
+        _validate_reading_derivative("junior-9b", books["junior-9b"], list(range(94, 105)))
+    if current == plan:
+        return current
+    write_json(destination, plan)
+    return plan
+
+
+def _check_replacement_baseline(plan: dict, bundle: Path) -> tuple[dict, dict]:
+    validate_bundle(bundle)
+    replacement = plan.get("replacement", {})
+    if (replacement.get("selected_books") != list(GRADE9_BOOKS)
+            or replacement.get("removed_books") != ["junior-9"]
+            or replacement.get("manifest_sha256") != sha256(bundle / "manifest.json")):
+        raise ValueError("replacement baseline identity mismatch")
+    base_work = Path(replacement["base_work"])
+    if sha256(base_work / "sources.json") != replacement.get("source_plan_sha256"):
+        raise ValueError("replacement baseline source plan changed")
+    baseline = json.loads((base_work / "sources.json").read_text())
+    indexes = {s: json.loads((bundle / f"{s}-vocab-index.min.json").read_text()) for s in ("pep", "nce")}
+    page_map = json.loads((bundle / "vocab-page-map.json").read_text())
+    catalogue = {k: (s, title) for s, index in indexes.items() for k, title in index["books"].items()}
+    if (set(catalogue) != set(baseline["books"]) or "junior-9" not in catalogue
+            or set(plan["books"]) != (set(catalogue) - {"junior-9"}) | set(GRADE9_BOOKS)):
+        raise ValueError("replacement baseline catalogue mismatch")
+    for book_id, book in baseline["books"].items():
+        mapped = page_map["books"][book_id]
+        if (catalogue[book_id] != (book["series"], book["title"])
+                or any(mapped[k] != book[k] for k in ("source_sha256", "source_page_count"))
+                or (book_id != "junior-9" and plan["books"][book_id] != book)):
+            raise ValueError(f"replacement baseline book mismatch: {book_id}")
+    for book_id in GRADE9_BOOKS:
+        book = plan["books"][book_id]
+        catalog_book = next(b for b in BOOKS if b.id == book_id)
+        if (book.get("id") != book_id or book.get("title") != catalog_book.title
+                or book.get("series") != "pep" or book.get("stage") != "junior"
+                or book.get("source_page_count") != REVIEWED_JUNIOR_TOC[book_id][0]
+                or book.get("pages") != [{"source_pdf_page": n, "unit": ""}
+                                        for n in range(JUNIOR_APPENDIX_STARTS[book_id], book["source_page_count"] + 1)]):
+            raise ValueError(f"replacement book plan mismatch: {book_id}")
+    return indexes, page_map
+
+
+def _validate_reading_derivative(book_id: str, book: dict, vocab_pages: list[int]) -> None:
+    value = book["reading_derivative"]
+    if (book_id != "junior-9b" or not isinstance(value, dict)
+            or set(value) != {"path", "sha256", "source_sha256", "source_pdf_pages", "note"}
+            or not isinstance(value["path"], str) or not Path(value["path"]).is_absolute()
+            or not all(valid_digest(value.get(k)) for k in ("sha256", "source_sha256"))
+            or value["source_sha256"] != book["source_sha256"]
+            or not isinstance(value["note"], str) or not value["note"].strip()
+            or not vocab_pages or value["source_pdf_pages"] != vocab_pages
+            or any(type(n) is not int for n in value["source_pdf_pages"])):
+        raise ValueError("reading derivative source/page binding mismatch")
+    if sha256(Path(value["path"])) != value["sha256"]:
+        raise ValueError("reading derivative file digest mismatch")
+    if len(PdfReader(value["path"]).pages) != len(vocab_pages):
+        raise ValueError("reading derivative page count mismatch")
 
 
 def record_page(book_id: str, page: int, printed_page: int | None,
@@ -222,26 +357,69 @@ def record_page(book_id: str, page: int, printed_page: int | None,
     return result
 
 
-def read_corpus(work: Path = WORK) -> tuple[dict, dict, list[str]]:
+def read_corpus(work: Path = WORK, *, books: tuple[str, ...] | list[str] | None = None,
+                without_pos: bool = False) -> tuple[dict, dict, list[str]]:
     plan = json.loads((work / "sources.json").read_text())
+    if without_pos:
+        plan.pop("pos_version", None)
+    selected = set(plan["books"] if books is None else books)
+    if not selected or selected - plan["books"].keys():
+        raise ValueError("selected books outside source plan")
     records, blockers = {}, []
     for book_id, book in plan["books"].items():
-        if sha256(Path(book["source"])) != book["source_sha256"]:
-            blockers.append(f"{book_id}: source PDF changed")
+        if book_id not in selected:
+            continue
+        try:
+            if sha256(Path(book["source"])) != book["source_sha256"]:
+                blockers.append(f"{book_id}: source PDF changed")
+            if len(PdfReader(book["source"]).pages) != book["source_page_count"]:
+                blockers.append(f"{book_id}: source page count changed")
+        except OSError as error:
+            blockers.append(f"{book_id}: source PDF unavailable: {error}")
+        record_work = work
+        if plan.get("replacement") and book_id not in plan["replacement"]["selected_books"]:
+            record_work = Path(plan["replacement"]["base_work"])
         records[book_id] = []
         for p in book["pages"]:
             page = p["source_pdf_page"]
-            path = work / "books" / book_id / "pages" / f"{page:03d}.json"
+            path = record_work / "books" / book_id / "pages" / f"{page:03d}.json"
             if not path.exists():
                 blockers.append(f"{book_id}/{page}: not transcribed")
                 continue
             try:
                 row = json.loads(path.read_text())
+                if without_pos:
+                    row.pop("pos_review", None)
+                    for entry in row["entries"]:
+                        entry.pop("pos", None)
                 validate_record(row, book, page)
             except (ValueError, KeyError, TypeError) as error:
                 blockers.append(f"{book_id}/{page}: {error}")
                 continue
             records[book_id].append(row)
+    has_gloss = plan.get("gloss_version") is not None or any(
+        "gloss_source" in entry for rows in records.values() for row in rows for entry in row["entries"])
+    if has_gloss:
+        if type(plan.get("gloss_version", GLOSS_VERSION)) is not int or plan.get("gloss_version", GLOSS_VERSION) != GLOSS_VERSION:
+            blockers.append("unsupported gloss provenance version")
+        plan["gloss_version"] = GLOSS_VERSION
+    for book_id, rows in records.items():
+        if "reading_derivative" in plan["books"][book_id]:
+            try:
+                _validate_reading_derivative(book_id, plan["books"][book_id],
+                                             [r["source_pdf_page"] for r in rows if r["kind"] == "vocab"])
+            except (ValueError, TypeError, KeyError, OSError) as error:
+                blockers.append(f"{book_id}: {error}")
+        for row in rows:
+            for entry in row["entries"]:
+                if "unit_source_pdf_page" not in entry:
+                    continue
+                origin = next((r for r in rows if r["source_pdf_page"] == entry["unit_source_pdf_page"]), None)
+                if not origin or not any(
+                        e["word"] == entry["word"] and e["unit"] == entry["unit"]
+                        and e.get("page") is not None and "unit_source_pdf_page" not in e
+                        for e in origin["entries"]):
+                    blockers.append(f"{book_id}/{row['source_pdf_page']}: cross-table Unit source does not confirm the word/Unit")
     has_pos = plan.get("pos_version") is not None or any(
         "pos_review" in row or any("pos" in entry for entry in row["entries"])
         for rows in records.values() for row in rows)
@@ -287,10 +465,46 @@ def pos_status(records: dict) -> dict:
     return result
 
 
-def build_bundle(work: Path = WORK, output: Path = OUTPUT) -> dict:
-    plan, records, blockers = read_corpus(work)
+def _reject_retired_grade9(books: dict) -> None:
+    if "junior-9" in books and not any(book.id == "junior-9" for book in BOOKS):
+        raise ValueError("retired book junior-9 cannot be built, published or installed; use the Grade 9 replacement plan/bundle")
+
+
+def build_bundle(work: Path = WORK, output: Path = OUTPUT, *, base_bundle: Path | None = None) -> dict:
+    initial = json.loads((work / "sources.json").read_text())
+    _reject_retired_grade9(initial["books"])
+    if initial.get("replacement") and base_bundle is None:
+        raise ValueError("replacement build requires the frozen --base-bundle")
+    if base_bundle is not None:
+        _check_replacement_baseline(initial, base_bundle)
+        base_work = Path(initial["replacement"]["base_work"])
+        if (output.resolve().is_relative_to(base_bundle.resolve())
+                or any(p.resolve().is_relative_to(output.resolve()) for p in (work, base_work, base_bundle))):
+            raise ValueError("replacement output must not overlap the frozen baseline or work directories")
+    plan, records, blockers = read_corpus(work, books=GRADE9_BOOKS if base_bundle else None)
     if blockers:
         raise ValueError(f"publication blocked: {len(blockers)} issues; first: {blockers[0]}")
+    return _build_reviewed_bundle(plan, records, output, base_bundle=base_bundle)
+
+
+def build_selected_draft(work: Path, output: Path, *, books: tuple[str, ...] | list[str] = GRADE9_BOOKS) -> dict:
+    """Bootstrap whole original pages/crops without claiming reviewed POS."""
+    plan, records, blockers = read_corpus(work, books=books, without_pos=True)
+    if blockers:
+        raise ValueError(f"draft blocked: {len(blockers)} issues; first: {blockers[0]}")
+    plan["books"] = {b: plan["books"][b] for b in records}
+    if plan.get("replacement") and set(records) - set(GRADE9_BOOKS):
+        raise ValueError("replacement draft may only bootstrap the selected Grade 9 books")
+    plan.pop("replacement", None)
+    if output.resolve() == OUTPUT.resolve() or work.resolve().is_relative_to(output.resolve()):
+        raise ValueError("draft output must differ from the formal bundle")
+    if (output / "manifest.json").exists() and json.loads((output / "manifest.json").read_text()).get("kind") != "draft":
+        raise ValueError("draft cannot replace a formal bundle")
+    return _build_reviewed_bundle(plan, records, output, draft=True)
+
+
+def _build_reviewed_bundle(plan: dict, records: dict, output: Path, *,
+                           base_bundle: Path | None = None, draft: bool = False) -> dict:
     output.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".vocab-reference-", dir=output.parent))
     try:
@@ -300,8 +514,27 @@ def build_bundle(work: Path = WORK, output: Path = OUTPUT) -> dict:
             for index in payloads.values():
                 index["pos_version"] = POS_VERSION
         page_map = {"v": 1, "coordinate_system": "visible-page-top-left-normalized", "books": {}}
+        if base_bundle is not None:
+            payloads, page_map = copy.deepcopy(_check_replacement_baseline(plan, base_bundle))
+            if payloads["pep"].get("pos_version") != plan.get("pos_version"):
+                raise ValueError("replacement POS version differs from baseline")
+            for removed in plan["replacement"]["removed_books"]:
+                page_map["books"].pop(removed)
+                index = payloads["pep"]
+                index["books"].pop(removed)
+                index["pdfs"].pop(removed)
+                index["w"] = {key: kept for key, hits in index["w"].items()
+                              if (kept := [h for h in hits if h["book"] != removed])}
+            for book in page_map["books"].values():
+                destination = staging / book["file"]
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(base_bundle / book["file"], destination)
         for book_id, book in plan["books"].items():
+            if book_id not in records:
+                continue
             source = PdfReader(book["source"])
+            reading = book.get("reading_derivative")
+            derivative = PdfReader(reading["path"]) if reading is not None else None
             writer, maps = PdfWriter(), []
             index = payloads[book["series"]]
             index["books"][book_id] = book["title"]
@@ -309,6 +542,8 @@ def build_bundle(work: Path = WORK, output: Path = OUTPUT) -> dict:
                 if record["kind"] != "vocab":
                     continue
                 original = source.pages[record["source_pdf_page"] - 1]
+                if derivative is not None:
+                    original = derivative.pages[reading["source_pdf_pages"].index(record["source_pdf_page"])]
                 writer.add_page(original)
                 snapshot_page = len(writer.pages)
                 planned_page = next(p for p in book["pages"] if p["source_pdf_page"] == record["source_pdf_page"])
@@ -320,12 +555,19 @@ def build_bundle(work: Path = WORK, output: Path = OUTPUT) -> dict:
                              "rotation": original.rotation})
                 if "pos_review" in record:
                     maps[-1]["pos_review"] = record["pos_review"]
+                notes = [{"headword": e["word"], "body_page": e["page"], "unit": e["unit"],
+                          "unit_source_pdf_page": e["unit_source_pdf_page"], "note": e["reference_note"]}
+                         for e in record["entries"] if "unit_source_pdf_page" in e]
+                if notes:
+                    maps[-1]["reference_notes"] = notes
                 writer.add_outline_item(f"原书第 {record['printed_page'] or record['source_pdf_page']} 页", snapshot_page - 1)
                 for entry in record["entries"]:
-                    identity = (book_id, entry["unit"], entry["page"], entry["zh"], entry["word"], pos_identity(entry.get("pos")))
+                    identity = (book_id, entry["unit"], entry["page"], entry["zh"], entry["word"], pos_identity(entry.get("pos")),
+                                gloss_identity(entry.get("gloss_source")), entry.get("unit_source_pdf_page"), entry.get("reference_note"))
                     for key in {lemma(w) for w in [entry["word"], *entry.get("aliases", [])]}:
                         hits = index["w"].setdefault(key, [])
-                        hit = next((h for h in hits if (h["book"], h["unit"], h.get("page"), h["zh"], h["headword"], pos_identity(h.get("pos"))) == identity), None)
+                        hit = next((h for h in hits if (h["book"], h["unit"], h.get("page"), h["zh"], h["headword"], pos_identity(h.get("pos")),
+                                   gloss_identity(h.get("gloss_source")), h.get("unit_source_pdf_page"), h.get("reference_note")) == identity), None)
                         if hit is None:
                             hit = {"book": book_id, "unit": entry["unit"], "zh": entry["zh"],
                                    "headword": entry["word"], "pdf_pages": [], "references": []}
@@ -333,6 +575,9 @@ def build_bundle(work: Path = WORK, output: Path = OUTPUT) -> dict:
                                 hit["page"] = entry["page"]
                             if "pos" in entry:
                                 hit.update(pos=semantics(entry["pos"]), pos_evidence=[])
+                            for field in ("gloss_source", "unit_source_pdf_page", "reference_note"):
+                                if field in entry:
+                                    hit[field] = entry[field]
                             hits.append(hit)
                         if snapshot_page not in hit["pdf_pages"]:
                             hit["pdf_pages"].append(snapshot_page)
@@ -366,9 +611,13 @@ def build_bundle(work: Path = WORK, output: Path = OUTPUT) -> dict:
             if len(PdfReader(destination).pages) != len(maps):
                 raise ValueError(f"snapshot count mismatch: {book_id}")
             pdf = {"file": relative, "sha256": sha256(destination), "page_count": len(maps)}
+            if reading is not None:
+                pdf["pdf_note"] = reading["note"]
             index["pdfs"][book_id] = pdf
             page_map["books"][book_id] = {**pdf, "source_sha256": book["source_sha256"],
                                           "source_page_count": book["source_page_count"], "pages": maps}
+            if reading is not None:
+                page_map["books"][book_id]["reading_derivative"] = {k: v for k, v in reading.items() if k != "path"}
             if book["stage"] == "junior":
                 _, starts, end = REVIEWED_JUNIOR_TOC[book_id]
                 page_map["books"][book_id].update(
@@ -377,13 +626,21 @@ def build_bundle(work: Path = WORK, output: Path = OUTPUT) -> dict:
                 )
         for series, index in payloads.items():
             index["w"] = dict(sorted(index["w"].items()))
-            write_json(staging / f"{series}-vocab-index.min.json", index)
+            if any("gloss_source" in hit for hits in index["w"].values() for hit in hits):
+                index["gloss_version"] = GLOSS_VERSION
+            destination = staging / f"{series}-vocab-index.min.json"
+            if base_bundle is not None and series == "nce":
+                shutil.copyfile(base_bundle / destination.name, destination)
+            else:
+                write_json(destination, index)
         write_json(staging / "vocab-page-map.json", page_map)
         manifest = {"v": 1, "index_version": VERSION, "files": {
             str(path.relative_to(staging)): sha256(path) for path in sorted(staging.rglob("*")) if path.is_file()}}
+        if draft:
+            manifest.update(kind="draft", reason="selected original-page bootstrap; POS evidence not published")
         write_json(staging / "manifest.json", manifest)
         # Validate every reference before publishing a directory as one unit.
-        validate_bundle(staging)
+        validate_bundle(staging, allow_draft=draft)
         backup = output.with_name(output.name + ".previous")
         if backup.exists():
             raise ValueError(f"preserve or remove previous backup before another publication: {backup}")
@@ -405,8 +662,10 @@ def build_bundle(work: Path = WORK, output: Path = OUTPUT) -> dict:
             shutil.rmtree(staging)
 
 
-def validate_bundle(path: Path) -> None:
+def validate_bundle(path: Path, *, allow_draft: bool = False) -> None:
     manifest = json.loads((path / "manifest.json").read_text())
+    if "kind" in manifest and (manifest["kind"] != "draft" or not allow_draft):
+        raise ValueError("draft bundle cannot validate as formal resources")
     if manifest.get("v") != 1 or manifest.get("index_version") != VERSION:
         raise ValueError("unsupported reference bundle version")
     files = manifest["files"]
@@ -430,6 +689,8 @@ def validate_bundle(path: Path) -> None:
             raise ValueError("index version mismatch")
         if "pos_version" in index and (type(index["pos_version"]) is not int or index["pos_version"] != POS_VERSION):
             raise ValueError("unsupported POS version")
+        if "gloss_version" in index and (type(index["gloss_version"]) is not int or index["gloss_version"] != GLOSS_VERSION):
+            raise ValueError("unsupported gloss provenance version")
         if set(index["books"]) != set(index["pdfs"]) or used_books.intersection(index["books"]):
             raise ValueError("book catalogue and PDFs disagree")
         used_books.update(index["books"])
@@ -437,6 +698,7 @@ def validate_bundle(path: Path) -> None:
             mapped = mapped_books.get(book_id)
             relative, count = pdf["file"], pdf["page_count"]
             if (not mapped or any(mapped.get(k) != pdf[k] for k in ("file", "page_count", "sha256")) or
+                    mapped.get("pdf_note") != pdf.get("pdf_note") or
                     relative not in files or files[relative] != pdf["sha256"] or
                     type(count) is not int or count < 1 or len(PdfReader(path / relative).pages) != count):
                 raise ValueError(f"PDF metadata mismatch: {book_id}")
@@ -444,6 +706,17 @@ def validate_bundle(path: Path) -> None:
             pages = mapped["pages"]
             if len(pages) != count or [p["snapshot_page"] for p in pages] != list(range(1, count + 1)):
                 raise ValueError(f"snapshot page map mismatch: {book_id}")
+            if "reading_derivative" in mapped or "pdf_note" in pdf:
+                reading = mapped.get("reading_derivative")
+                if (book_id != "junior-9b" or not isinstance(reading, dict)
+                        or set(reading) != {"sha256", "source_sha256", "source_pdf_pages", "note"}
+                        or not all(valid_digest(reading.get(k)) for k in ("sha256", "source_sha256"))
+                        or reading["source_sha256"] != mapped["source_sha256"]
+                        or reading["source_pdf_pages"] != [p["source_pdf_page"] for p in pages]
+                        or any(type(n) is not int for n in reading["source_pdf_pages"])
+                        or not isinstance(reading["note"], str) or not reading["note"].strip()
+                        or pdf.get("pdf_note") != reading["note"]):
+                    raise ValueError("reading derivative public provenance mismatch")
             previous = 0
             for p in pages:
                 source_page = p["source_pdf_page"]
@@ -451,6 +724,18 @@ def validate_bundle(path: Path) -> None:
                     raise ValueError(f"invalid original page ordering: {book_id}")
                 previous = source_page
                 validate_regions(p["regions"])
+                if "reference_notes" in p:
+                    notes = p["reference_notes"]
+                    if not isinstance(notes, list) or not notes:
+                        raise ValueError("invalid mapped Unit reference notes")
+                    for note in notes:
+                        if (not isinstance(note, dict) or set(note) != {"headword", "body_page", "unit", "unit_source_pdf_page", "note"}
+                                or any(not isinstance(note[k], str) or not note[k].strip() for k in ("headword", "unit", "note"))
+                                or type(note["body_page"]) is not int or note["body_page"] < 1
+                                or type(note["unit_source_pdf_page"]) is not int
+                                or note["unit_source_pdf_page"] == source_page
+                                or not any(r["source_pdf_page"] == note["unit_source_pdf_page"] and note["unit"] in r["units"] for r in pages)):
+                            raise ValueError("invalid mapped Unit reference note")
                 if "pos_review" in p:
                     review = p["pos_review"]
                     if (not isinstance(review, dict) or review.get("reviewed_by") != "codex-direct-vision" or not isinstance(review.get("regions"), dict)
@@ -475,6 +760,25 @@ def validate_bundle(path: Path) -> None:
                     mapped_page = mapped_books[hit["book"]]["pages"][ref["pdf_page"] - 1]
                     if ref["region_id"] not in {r["id"] for r in mapped_page["regions"]} or hit["unit"] not in mapped_page["units"]:
                         raise ValueError(f"bad region or unit reference: {word}")
+                if "gloss_source" in hit:
+                    if index.get("gloss_version") != GLOSS_VERSION:
+                        raise ValueError("gloss provenance requires an extension version")
+                    validate_gloss_source(hit["gloss_source"], mapped_books[hit["book"]]["source_page_count"])
+                if "unit_source_pdf_page" in hit or "reference_note" in hit:
+                    mapped = mapped_books[hit["book"]]
+                    source_page, note = hit.get("unit_source_pdf_page"), hit.get("reference_note")
+                    explanation = {"headword": hit["headword"], "body_page": hit.get("page"), "unit": hit["unit"],
+                                   "unit_source_pdf_page": source_page, "note": note}
+                    if (type(source_page) is not int or not isinstance(note, str) or not note.strip()
+                            or not any(explanation in mapped["pages"][r["pdf_page"] - 1].get("reference_notes", []) for r in references)):
+                        raise ValueError("Unit reference note and mapped source disagree")
+                    candidates = index["w"].get(lemma(hit["headword"]), [])
+                    confirmed = [h for h in candidates if h["book"] == hit["book"] and h["headword"] == hit["headword"]
+                                 and h["unit"] == hit["unit"] and "unit_source_pdf_page" not in h and h.get("page") is not None
+                                 and any(mapped["pages"][r["pdf_page"] - 1]["source_pdf_page"] == source_page for r in h["references"])]
+                    if (not confirmed or hit["book"] not in REVIEWED_JUNIOR_TOC
+                            or any(junior_unit(hit["book"], mapped["source_page_count"], h["page"]) != hit["unit"] for h in confirmed)):
+                        raise ValueError("cross-table Unit source does not confirm the word/Unit")
                 if index.get("pos_version") and "pos" not in hit:
                     raise ValueError("complete POS index is missing an occurrence status")
                 if not index.get("pos_version") and ("pos" in hit or "pos_evidence" in hit):
@@ -508,6 +812,7 @@ def validate_bundle(path: Path) -> None:
 def install_bundle(bundle: Path, destination: Path) -> dict:
     """Install the complete resource directory, validating before replacement."""
     validate_bundle(bundle)
+    _reject_retired_grade9(json.loads((bundle / "vocab-page-map.json").read_text())["books"])
     if bundle.resolve() == destination.resolve():
         raise ValueError("source bundle and destination must differ")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -537,15 +842,20 @@ def install_bundle(bundle: Path, destination: Path) -> dict:
 def publish_indexes(bundle: Path, destination: Path) -> dict:
     """Export the small versioned indexes/map for source control, without PDFs."""
     validate_bundle(bundle)
+    _reject_retired_grade9(json.loads((bundle / "vocab-page-map.json").read_text())["books"])
     files = {"pep-vocab-index.min.json": "vocab-index.min.json",
              "nce-vocab-index.min.json": "nce-vocab-index.min.json",
              "vocab-page-map.json": "vocab-page-map.json"}
     for source, target in files.items():
-        write_json(destination / target, json.loads((bundle / source).read_text()))
+        destination.mkdir(parents=True, exist_ok=True)
+        temporary = destination / (target + ".tmp")
+        shutil.copyfile(bundle / source, temporary)
+        os.replace(temporary, destination / target)
     return {"published": str(destination.resolve()), "files": list(files.values())}
 
 
-def export_regions(bundle: Path = OUTPUT, output: Path = DEFAULT_WORK / "vocab-page-regions", dpi: int = 200) -> dict:
+def export_regions(bundle: Path = OUTPUT, output: Path = DEFAULT_WORK / "vocab-page-regions", dpi: int = 200,
+                   *, books: tuple[str, ...] | list[str] | None = None) -> dict:
     """Rebuild derived crops from the portable full-page PDFs and their map.
 
     Poppler renders the visible page, including its PDF rotation; stored boxes
@@ -555,11 +865,16 @@ def export_regions(bundle: Path = OUTPUT, output: Path = DEFAULT_WORK / "vocab-p
     from PIL import Image
     from vocab_ocr.shared.pdf_render import render_pages
 
-    validate_bundle(bundle)
+    validate_bundle(bundle, allow_draft=True)
     page_map = json.loads((bundle / "vocab-page-map.json").read_text())
+    selected = set(page_map["books"] if books is None else books)
+    if not selected or selected - page_map["books"].keys():
+        raise ValueError("selected books outside bundle catalogue")
     output.mkdir(parents=True, exist_ok=True)
     count = 0
     for book_id, book in page_map["books"].items():
+        if book_id not in selected:
+            continue
         destination = output / book_id
         destination.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="vocab-regions-") as temporary:
@@ -585,24 +900,38 @@ def export_regions(bundle: Path = OUTPUT, output: Path = DEFAULT_WORK / "vocab-p
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "status", "build", "validate", "regions", "install", "publish"))
-    parser.add_argument("--work", type=Path, default=WORK)
+    parser.add_argument("command", choices=("prepare", "prepare-grade9", "status", "build", "draft", "validate", "regions", "install", "publish"))
+    parser.add_argument("--work", type=Path)
+    parser.add_argument("--base-work", type=Path, default=WORK)
+    parser.add_argument("--base-bundle", type=Path)
+    parser.add_argument("--reading-pdf", type=Path)
+    parser.add_argument("--book", action="append", dest="books")
     parser.add_argument("--output", type=Path, default=OUTPUT)
     parser.add_argument("--regions-output", type=Path, default=DEFAULT_WORK / "vocab-page-regions")
     parser.add_argument("--dpi", type=int, default=200)
     parser.add_argument("--destination", type=Path)
     args = parser.parse_args()
+    work = args.work or (GRADE9_WORK if args.command == "prepare-grade9" else WORK)
+    if args.books and args.command not in {"draft", "regions"}:
+        parser.error("--book is only supported for draft and regions")
+    if args.reading_pdf and args.command != "prepare-grade9":
+        parser.error("--reading-pdf is only supported for prepare-grade9")
     if args.command == "prepare":
-        plan = prepare(args.work)
+        plan = prepare(work)
         result = {"books": len(plan["books"]), "pages": sum(len(b["pages"]) for b in plan["books"].values())}
+    elif args.command == "prepare-grade9":
+        plan = prepare_grade9_replacement(args.base_work, work, args.base_bundle or OUTPUT, reading_pdf=args.reading_pdf)
+        result = {"books": len(plan["books"]), "selected_books": list(GRADE9_BOOKS), "work": str(work.resolve())}
     elif args.command == "status":
-        plan, records, blockers = read_corpus(args.work)
+        plan, records, blockers = read_corpus(work)
         result = {"books": len(plan["books"]), "reviewed_pages": sum(len(r) for r in records.values()),
                   "remaining_pages": len(blockers), "next": blockers[:5], "pos": pos_status(records)}
     elif args.command == "build":
-        result = build_bundle(args.work, args.output)
+        result = build_bundle(work, args.output, base_bundle=args.base_bundle)
+    elif args.command == "draft":
+        result = build_selected_draft(work, args.output, books=args.books or GRADE9_BOOKS)
     elif args.command == "regions":
-        result = export_regions(args.output, args.regions_output, args.dpi)
+        result = export_regions(args.output, args.regions_output, args.dpi, books=args.books)
     elif args.command == "install":
         if args.destination is None:
             parser.error("install requires --destination (the application resource folder)")

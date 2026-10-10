@@ -21,7 +21,8 @@ BOOKS: list[PepBook] = [
     PepBook("junior-7b", "英语七年级下册", "junior", DOWNLOADS / "789txt-main" / "英语七年级下册.pdf"),
     PepBook("junior-8a", "英语八年级上册", "junior", DOWNLOADS / "789txt-main" / "英语八年级上册.pdf"),
     PepBook("junior-8b", "英语八年级下册", "junior", DOWNLOADS / "789txt-main" / "英语八年级下册.pdf"),
-    PepBook("junior-9", "英语九年级全一册", "junior", DOWNLOADS / "789txt-main" / "英语九年级全一册.pdf"),
+    PepBook("junior-9a", "英语九年级上册", "junior", DOWNLOADS / "789txt-main" / "英语九年级上册.pdf"),
+    PepBook("junior-9b", "英语九年级下册", "junior", DOWNLOADS / "初中（六三学制）" / "九年级" / "2027春人教版九年级英语下册电子课本（彩色版）.pdf"),
     PepBook(
         "senior-compulsory-1",
         "英语必修第一册",

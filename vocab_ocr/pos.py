@@ -70,7 +70,7 @@ def validate_pos(pos: dict) -> None:
             raise ValueError("printed POS senses and occurrence tags disagree")
     if "inherited_from" in pos:
         inherited = pos["inherited_from"]
-        if (status != "printed" or not isinstance(inherited, dict)
+        if (status not in {"printed", "unmarked"} or not isinstance(inherited, dict)
                 or set(inherited) != {"source_pdf_page", "region_id", "entry_index"}
                 or type(inherited["source_pdf_page"]) is not int or inherited["source_pdf_page"] < 1
                 or type(inherited["entry_index"]) is not int or inherited["entry_index"] < 0
